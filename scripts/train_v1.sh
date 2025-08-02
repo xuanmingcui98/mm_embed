@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=desc
+#SBATCH --job-name=bm
 #SBATCH --nodes=8
 #SBATCH --cpus-per-task=12
 #SBATCH --gres=gpu:8
@@ -25,7 +25,7 @@ GPU_PER_NODE=$SLURM_GPUS_ON_NODE
 source /home/xuanmingcui/miniconda3/etc/profile.d/conda.sh
 conda activate def
 
-EXP_NAME="qwen2-2b_v2_imageonly_chat_qry_tgt_desc_lr2e-4_8x8_${SLURM_JOB_ID}"
+EXP_NAME="qwen2-2b_v2_imageonly_bm_lr2e-4_8x8_${SLURM_JOB_ID}"
 EXP_DIR="runs/$EXP_NAME"
 
 rdzv_id=$RANDOM
@@ -48,6 +48,6 @@ srun torchrun --nnodes $NNODES --nproc_per_node $GPU_PER_NODE --rdzv_id=$rdzv_id
 
 if [ "$SLURM_PROCID" -eq 0 ]; then
     echo "Training completed on master node. Submitting eval job..."
-    sbatch --job-name=eval --output=slurm_logs/eval/eval_${run_name}.out --export=checkpoint_path=$output_dir scripts/eval_v1.sh \
+    sbatch --job-name=eval --output=slurm_logs/eval/eval_${run_name}.out --export=checkpoint_path=$output_dir scripts/subscripts/eval_v1.sh \
 
 fi
