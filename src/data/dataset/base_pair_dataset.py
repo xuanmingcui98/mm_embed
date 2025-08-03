@@ -141,6 +141,13 @@ class BaseDatasetProcessor:
                 with open(desc_path, "rb") as f:
                     self.target_descriptions = pickle.load(f)
 
+        if self.model_args.meta_queries is not None and self.model_args.meta_queries > 0:
+            self.meta_queries = "".join(
+                [f'<meta_query_{i}>' for i in range(self.model_args.meta_queries)]
+            )
+        else:
+            self.meta_queries = ''
+
     def load(self):
         dataset = self._load_hf_dataset()
 
@@ -156,10 +163,8 @@ class BaseDatasetProcessor:
         if 'neg_image_path' in self.column_names:
             remove_columns.append('neg_image_path')
 
-        process_fn = partial(self.batch_preprocess, data_args=self.data_args, model_args=self.model_args, processor=self.processor, **self.dataset_config)
         dataset = dataset.map(
                             lambda x:
-                            # # format_fn(x), 
                             self.batch_preprocess(x, data_args=self.data_args, model_args=self.model_args, processor=self.processor, **self.dataset_config),
                             # process_fn,
                             batched=True, 
@@ -240,8 +245,8 @@ class BaseDatasetProcessor:
             if data_args.apply_chat_template:
                 qry_text = get_query(kwargs['subset_name'], qry_text, data_args.use_cot)
                 pos_text = get_target(kwargs['subset_name'], pos_text, data_args.use_cot)
-                qry_text = format_text_for_chat_template(processor, qry_text, qry_image_path, description=qry_description, add_generation_prompt=not is_train and model_args.do_sft_query)
-                pos_text = format_text_for_chat_template(processor, pos_text, pos_image_path, description=pos_description, add_generation_prompt=not is_train and model_args.do_sft_target)
+                qry_text = format_text_for_chat_template(processor, qry_text, qry_image_path, description=qry_description, add_generation_prompt=not is_train and model_args.do_sft_query) + self.meta_queries
+                pos_text = format_text_for_chat_template(processor, pos_text, pos_image_path, description=pos_description, add_generation_prompt=not is_train and model_args.do_sft_target) + self.meta_queries
             else:
                 if model_backbone != PHI3V:
                     qry_text = qry_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[model_backbone])

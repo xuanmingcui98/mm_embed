@@ -42,6 +42,7 @@ class ModelArguments:
     mask_visual_tokens_for_pooling: bool = field(default=False, metadata={"help": "mask visual tokens for pooling"})
     num_pooling_layers: int = field(default=4, metadata={"help": "number of pooling layers"})
     pooling_last_n_layers: int = field(default=None, metadata={"help": "number of last layers to use for pooling"})
+    meta_queries: int = field(default=None, metadata={"help": "number of meta queries for the model, if set, it will add special tokens to the tokenizer and resize the embedding layer"})
 
 @dataclass
 class DataArguments:

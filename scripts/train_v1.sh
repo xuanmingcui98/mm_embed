@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=bm
+#SBATCH --job-name=mq
 #SBATCH --nodes=8
 #SBATCH --cpus-per-task=12
 #SBATCH --gres=gpu:8
@@ -25,7 +25,7 @@ GPU_PER_NODE=$SLURM_GPUS_ON_NODE
 source /home/xuanmingcui/miniconda3/etc/profile.d/conda.sh
 conda activate def
 
-EXP_NAME="qwen2-2b_v2_imageonly_bm_lr2e-4_8x8_${SLURM_JOB_ID}"
+EXP_NAME="qwen2-2b_v2_imageonly_chat_lr2e-4_meta_queries16_8x8_${SLURM_JOB_ID}"
 EXP_DIR="runs/$EXP_NAME"
 
 rdzv_id=$RANDOM
@@ -34,10 +34,10 @@ mkdir -p $EXP_DIR
 
      # --use_symmetric_loss True \
      # --inter_task_temperature 0.08 \
-     # --query_description_dir descriptions --target_description_dir descriptions_target \
 srun torchrun --nnodes $NNODES --nproc_per_node $GPU_PER_NODE --rdzv_id=$rdzv_id --rdzv_backend c10d --rdzv_endpoint $MASTER_ADDR:$MASTER_PORT \
      train.py \
-     --apply_chat_template False \
+     --apply_chat_template True \
+     --meta_queries 16 \
      --lora --lora_r 16 --model_name Qwen/Qwen2-VL-2B-Instruct --bf16 --pooling_module eos --normalize True \
      --temperature 0.02 --dataloader_num_workers 4 --dataset_config configs/train/train_image.yaml \
      --run_name $EXP_NAME --output_dir $EXP_DIR --grad_cache True --per_device_train_batch_size 128 \
@@ -48,6 +48,6 @@ srun torchrun --nnodes $NNODES --nproc_per_node $GPU_PER_NODE --rdzv_id=$rdzv_id
 
 if [ "$SLURM_PROCID" -eq 0 ]; then
     echo "Training completed on master node. Submitting eval job..."
-    sbatch --job-name=eval --output=slurm_logs/eval/eval_${run_name}.out --export=checkpoint_path=$output_dir scripts/subscripts/eval_v1.sh \
+    sbatch --job-name=eval --output=slurm_logs/eval/eval_${run_name}.out --export=checkpoint_path=$EXP_DIR scripts/subscripts/eval_v1.sh \
 
 fi

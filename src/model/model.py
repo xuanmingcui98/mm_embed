@@ -44,7 +44,7 @@ class MMEBModel(nn.Module):
                  model_config,
                  encoder: PreTrainedModel,
                  processor,
-                 pooling_module = None
+                 pooling_module = None,
                  ):
         super().__init__()
         self.encoder_config = encoder.config
@@ -294,6 +294,15 @@ class MMEBModel(nn.Module):
 
             base_model = lora_model.merge_and_unload()
 
+        modules_to_save = None
+        if model_args.meta_queries is not None and model_args.meta_queries > 0:
+
+            processor.tokenizer.add_special_tokens(
+                {'additional_special_tokens': [f'<meta_query_{i}>' for i in range(model_args.meta_queries)]})
+
+            base_model.resize_token_embeddings(len(processor.tokenizer))
+            modules_to_save = ["embed_tokens"]
+
         if model_args.lora:
             print_master(f'Loading lora adapter from {base_model}')
             lora_config = LoraConfig(
@@ -303,10 +312,24 @@ class MMEBModel(nn.Module):
                 lora_dropout=model_args.lora_dropout,
                 init_lora_weights="gaussian",
                 use_dora=True,
-                inference_mode=False
+                inference_mode=False,
+                modules_to_save=modules_to_save
             )
 
             base_model = get_peft_model(base_model, lora_config)
+
+            if model_args.meta_queries is not None and model_args.meta_queries > 0:
+                meta_query_ids = processor.tokenizer.convert_tokens_to_ids(
+                    [f'<meta_query_{i}>' for i in range(model_args.meta_queries)])
+                embedding = base_model.get_input_embeddings()
+                def grad_filter(grad):
+                    # @xuanming dirty way to not update the old embeddings. Since weight decay is 0 by default, this should be fine
+                    mask = torch.zeros_like(grad)
+                    mask[meta_query_ids, :] = 1.0
+                    return grad * mask
+
+                embedding.weight.register_hook(grad_filter)
+
 
         pooling_module = None
         if model_args.pooling_module not in {'last', 'eos'}:
@@ -418,6 +441,13 @@ class MMEBModel(nn.Module):
 
             base_model = sft_lora_model.merge_and_unload()
 
+
+        if model_args.meta_queries is not None and model_args.meta_queries > 0:
+            processor.tokenizer.add_special_tokens(
+                {'additional_special_tokens': [f'<meta_query_{i}>' for i in range(model_args.meta_queries)]})
+
+            base_model.resize_token_embeddings(len(processor.tokenizer))
+
         # Building the model on top of the base
         if model_args.lora:
             print_master(f'Loading LoRA from {model_name_or_path}')
@@ -426,9 +456,6 @@ class MMEBModel(nn.Module):
             base_model.load_adapter(model_name_or_path, base_model.active_adapter, is_trainable=is_trainable)
             if not is_trainable:
                 base_model = base_model.merge_and_unload()
-
-            
-
 
         base_model.model_backbone = model_args.model_backbone
         pooling_module = None

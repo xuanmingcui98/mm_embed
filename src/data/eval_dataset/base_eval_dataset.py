@@ -181,6 +181,13 @@ class BaseEvalDatasetProcessor:
         self.subset_name = self.dataset_config.get("dataset_name")
         self.dataset_split = self.dataset_config.get("dataset_split", "test")
 
+        if self.model_args.meta_queries is not None and self.model_args.meta_queries > 0:
+            self.meta_queries = "".join(
+                [f'<meta_query_{i}>' for i in range(self.model_args.meta_queries)]
+            )
+        else:
+            self.meta_queries = ''
+
         self.query_descriptions = self.target_descriptions = None
         if data_args.query_description_dir is not None and not model_args.do_sft_query:
             desc_path = os.path.join(data_args.query_description_dir, self.subset_name, "cot", "query.pkl")
@@ -259,7 +266,8 @@ class BaseEvalDatasetProcessor:
                 description = format_description(self.target_descriptions[(cand_text, cand_image)], self.data_args.use_cot)
 
             cand_text_processed = get_target(self.subset_name, cand_text, self.data_args.use_cot)
-            cand_text_processed = format_text_for_chat_template(self.processor, cand_text_processed, cand_image, description=description, add_generation_prompt=self.model_args.do_sft_target)
+            cand_text_processed = format_text_for_chat_template(self.processor, cand_text_processed, cand_image, description=description, add_generation_prompt=self.model_args.do_sft_target) + self.meta_queries
+            
             preprocessed_pairs[(cand_text, cand_image)] = cand_text_processed
         
         return preprocessed_pairs
@@ -271,13 +279,13 @@ class BaseEvalDatasetProcessor:
 
         query_texts, query_images, cand_texts, cand_images, dataset_infos = [], [], [], [], []
         for qry_text, qry_image_path, tgt_texts, tgt_image_paths in (
-                zip(batch_dict['qry_text'], batch_dict['qry_image_path'], batch_dict['tgt_text'], batch_dict['tgt_img_path'])):
+                zip(batch_dict['qry_text'], batch_dict['qry_img_path'], batch_dict['tgt_text'], batch_dict['tgt_img_path'])):
             qry_description = None
             if self.query_descriptions is not None:
                 qry_description = format_description(self.query_descriptions[(qry_text, qry_image_path)], self.data_args.use_cot)
 
-            qry_text = get_query(self.dataset_config['subset_name'], qry_text, self.data_args.use_cot)
-            qry_text = format_text_for_chat_template(self.processor, qry_text, qry_image_path, description=qry_description, add_generation_prompt=self.model_args.do_sft_query)
+            qry_text = get_query(self.subset_name, qry_text, self.data_args.use_cot)
+            qry_text = format_text_for_chat_template(self.processor, qry_text, qry_image_path, description=qry_description, add_generation_prompt=self.model_args.do_sft_query) + self.meta_queries
             query_texts.append([qry_text])
 
             if qry_image_path.strip():

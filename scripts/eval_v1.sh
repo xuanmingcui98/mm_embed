@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=12
 #SBATCH --gres=gpu:4
 #SBATCH -t 1-0
-#SBATCH --output=slurm_logs/eval/eval_qwen2-2b_v2_imageonly_bm_lr1e-4_4x8_470630_%j.out
+#SBATCH --output=slurm_logs/eval/eval_qwen2-2b_v2_imageonly_bm_lr2e-4_8x8_471338_%j.out
 #SBATCH --account=all
 
 source /home/xuanmingcui/miniconda3/etc/profile.d/conda.sh
@@ -18,7 +18,7 @@ BATCH_SIZE=16
 # MODALITIES=("image" "video" "visdoc")
 MODALITIES=("image")
 
-checkpoint_path="runs/qwen2-2b_v2_imageonly_bm_lr1e-4_4x8_470630"
+checkpoint_path="runs/qwen2-2b_v2_imageonly_bm_lr2e-4_8x8_471338"
 
 # Loop through each modality for the current model
 for MODALITY in "${MODALITIES[@]}"; do

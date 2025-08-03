@@ -206,7 +206,8 @@ News text: {query}"""
     elif task in {"RefCOCO-Matching"}:
         target_user_prompts_cot[task] = query_user_prompts_cot["MSCOCO"]
     elif task in task_categories['vqa'] | task_categories['classification']:
-        target_user_prompts_cot[task] = query_user_prompts_cot[task]    
+        target_user_prompts_cot[task] = """Represent the following text as text embeddings.
+Answer: {query}"""
 
 def get_query(task, query, use_cot=True):
 
