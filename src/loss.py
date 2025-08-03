@@ -15,7 +15,13 @@ class SimpleContrastiveLoss:
             target_per_qry = y.size(0) // x.size(0)
             target = torch.arange(
                 0, x.size(0) * target_per_qry, target_per_qry, device=x.device, dtype=torch.long)
-        logits = torch.matmul(x, y.transpose(0, 1))
+            
+        if x.dim() == 3 and y.dim() == 3:
+            # late interaction [bs, n_queries, d]
+            logits = torch.einsum("bnd,csd->bcns", x, y)
+            logits = logits.amax(dim=3).sum(dim=2) / x.shape[1]
+        else:
+            logits = torch.matmul(x, y.transpose(0, 1))
 
         T = self.temperature
         if self.inter_task_temperature is not None:

@@ -55,3 +55,6 @@ descriptions*
 runs/*
 slurm_logs/*
 wandb/*
+
+configs/train/*.yaml
+configs/eval/*.yaml

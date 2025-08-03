@@ -70,6 +70,9 @@ class MMEBModel(nn.Module):
         self.pooling_module = pooling_module
         self.visual_token_ids = get_visual_token_ids(processor)
 
+        if model_config.meta_queries is not None and model_config.meta_queries > 0:
+            self.meta_queries = [f'<meta_query_{i}>' for i in range(model_config.meta_queries)]
+
     @torch.no_grad()
     def generate(self, input, return_hidden_states=True, return_decode_answer=False):
         results = self.encoder.generate(**{
@@ -200,8 +203,32 @@ class MMEBModel(nn.Module):
                 for visual_token_id in self.visual_token_ids:
                     attention_mask[input['input_ids'] == visual_token_id] = 0
             reps = self.pooling_module(results.hidden_states, attention_mask)
-        else:
-            raise NotImplementedError
+        elif self.pooling_module_type == 'meta_queries':
+            # concat meta queries
+
+            assert hasattr(self, 'meta_queries'), "meta_queries is not set"
+            meta_query_ids = self.processor.tokenizer.convert_tokens_to_ids(self.meta_queries)
+            meta_query_id_idx = []
+            for seq in input['input_ids']:
+                indices = [(seq == meta_query_id).nonzero()[0][0].item() for meta_query_id in meta_query_ids]
+                meta_query_id_idx.append(indices)
+            
+            meta_query_id_idx = torch.tensor(meta_query_id_idx, device=last_hidden_state.device)
+
+            meta_query_hidden_states = torch.gather(
+                last_hidden_state, dim=1, index=meta_query_id_idx.unsqueeze(-1).expand(-1, -1, last_hidden_state.shape[-1]))
+            if self.model_config.meta_queries_aggregate_type == 'mean':
+                # mean pooling
+                meta_query_hidden_states = meta_query_hidden_states.mean(dim=1)
+            elif self.model_config.meta_queries_aggregate_type == 'concat':
+                # concat pooling
+                meta_query_hidden_states = meta_query_hidden_states.cat(dim=1)
+            elif self.model_config.meta_queries_aggregate_type == 'late_interaction':
+                # late fusion pooling. no pooling 
+                reps = meta_query_hidden_states
+            elif self.model_config.meta_queries_aggregate_type == 'attention_pooler':
+                # attention pooling for meta queries with n pooling_n_queries concatted along the latent dim
+                reps = self.pooling_module(meta_query_hidden_states)
         if self.normalize:
             reps = torch.nn.functional.normalize(reps, p=2, dim=-1)
         return reps
@@ -361,6 +388,16 @@ class MMEBModel(nn.Module):
                         num_layers=model_args.num_pooling_layers,
                         last_n_layers=model_args.pooling_last_n_layers)
                 )
+            elif model_args.meta_queries is not None \
+                and model_args.meta_queries > 0 \
+                and model_args.meta_queries_aggregate_type == "attention_pooler":
+                # attention pooling for meta queries with n pooling_n_queries concatted along the latent dim
+                pooling_module = AttentionPooler(AttentionPoolingConfig(input_embed_dim=base_model.config.hidden_size,
+                                                                        output_embed_dim=base_model.config.hidden_size,
+                                                                        n_queries=model_args.pooling_n_queries,
+                                                                        n_head=model_args.pooling_n_heads,
+                                                                        aggregate="concat"))
+
 
         model = cls(
             encoder=base_model,
@@ -494,6 +531,15 @@ class MMEBModel(nn.Module):
                     trust_remote_code=True
                 )
                 pooling_module = TruncatedSelfPooler(base_model, pooling_config)
+            elif model_args.meta_queries is not None \
+                and model_args.meta_queries > 0 \
+                and model_args.meta_queries_aggregate_type == "attention_pooler":
+                # attention pooling for meta queries with n pooling_n_queries concatted along the latent dim
+                pooling_module = AttentionPooler(AttentionPoolingConfig(input_embed_dim=base_model.config.hidden_size,
+                                                                        output_embed_dim=base_model.config.hidden_size,
+                                                                        n_queries=model_args.pooling_n_queries,
+                                                                        n_head=model_args.pooling_n_heads,
+                                                                        aggregate="concat"))
             pooling_module.load_state_dict(pooler_state_dict, strict=True)
 
         
@@ -581,4 +627,9 @@ class MMEBModel(nn.Module):
         return all_tensors
 
     def compute_similarity(self, q_reps, p_reps):
+        if q_reps.dim() == 3 and p_reps.dim() == 3:
+            # late interaction [bs, n_queries, d]
+            scores = torch.einsum("bnd,csd->bcns", q_reps, p_reps)
+            scores = scores.amax(dim=3).sum(dim=2) / q_reps.shape[1] # normalize by n queries
+            return scores
         return torch.matmul(q_reps, p_reps.transpose(0, 1))
