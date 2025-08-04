@@ -79,12 +79,17 @@ class AttentionPooler(PreTrainedModel):
         # (n_queries, output_embed_dim) -> (batch_size, n_queries, output_embed_dim)
         query = self._repeat(query, batch_size)
 
-        out = self.attn(query, x, x, attn_mask=padding_mask.unsqueeze(1).unsqueeze(1).bool())
+        if padding_mask is not None:
+            padding_mask = padding_mask.unsqueeze(1).unsqueeze(1).bool()
+
+        out = self.attn(query, x, x, attn_mask=padding_mask)
         assert isinstance(out, Tensor)
         out = self.ln_post(out)
 
         if self.config.aggregate == "mean":
             out = out.mean(1)
+        elif self.config.aggregate == "concat":
+            out = rearrange(out, "b n d -> b (n d)")
         return out
 
     def _repeat(self, query: Tensor, N: int) -> Tensor:

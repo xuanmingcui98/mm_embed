@@ -37,12 +37,13 @@ class ModelArguments:
     do_sft_query: bool = field(default=False, metadata={"help": "do supervised fine-tuning"})
     do_cl: bool = field(default=True, metadata={"help": "do contrastive learning"})
     do_sft_target: bool = field(default=False, metadata={"help": "do supervised fine-tuning"})
-    pooling_n_queries: int = field(default=1, metadata={"help": "number of queries for pooling"})
+    pooling_n_queries: int = field(default=4, metadata={"help": "number of queries for pooling"})
     pooling_n_heads: int = field(default=8, metadata={"help": "number of heads for pooling"})
     mask_visual_tokens_for_pooling: bool = field(default=False, metadata={"help": "mask visual tokens for pooling"})
     num_pooling_layers: int = field(default=4, metadata={"help": "number of pooling layers"})
     pooling_last_n_layers: int = field(default=None, metadata={"help": "number of last layers to use for pooling"})
     meta_queries: int = field(default=None, metadata={"help": "number of meta queries for the model, if set, it will add special tokens to the tokenizer and resize the embedding layer"})
+    meta_queries_aggregate_type: str = field(default='mean', metadata={"help": "how to aggregate meta queries, mean, concat, late_interaction, attention_pooler"})
 
 @dataclass
 class DataArguments:
