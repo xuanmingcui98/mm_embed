@@ -1,8 +1,8 @@
 N24News:
     dataset_parser: mmeb
-    dataset_name: /home/xuanmingcui/datasets/MMEB-train
+    dataset_name: /home/jianpengcheng/VLM2Vec/data/vlm2vec_train/MMEB-train
     subset_name: N24News
     dataset_split: original
-    image_dir: /home/xuanmingcui/datasets/MMEB-train
+    image_dir: /home/jianpengcheng/VLM2Vec/data/vlm2vec_train/MMEB-train
     num_sample_per_subset: 50000
     weight: 1
