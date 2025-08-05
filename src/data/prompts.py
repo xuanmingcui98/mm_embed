@@ -6,7 +6,9 @@ IMAGE_TASKS = ['ImageNet-1K', "ImageNet_1K", 'N24News', 'HatefulMemes', 'VOC2007
          'VizWiz', 'GQA', 'TextVQA', 'VisDial', 'CIRR', 'VisualNews_t2i', 'VisualNews_i2t', 'MSCOCO_t2i', 
          'MSCOCO_i2t', 'Wiki-SS-NQ', 'WebQA', 'OVEN', 'EDIS', 'RefCOCO-Matching', 'Visual7W-Pointing']
 
-VIDEO_TASKS = []
+VIDEO_TASKS = ["SmthSmthV2", "HMDB51", "Kinetics-700", "UCF101", "Breakfast", 
+               "vidore/colpali_train_set", "openbmb/VisRAG-Ret-Train-In-domain-data", 
+               "video_caption_300k", "video_qa_240k", "MSR-VTT", "video_caption_300k-video"]
 
 VISDOC_TASKS = []
 
@@ -82,13 +84,17 @@ def extract_target_from_mmeb(text, subset):
     return text.replace("<|image_1|>", "").strip()
 
 
-def format_text_for_chat_template(processor, text, image_path, description=None, add_generation_prompt=False):
+def format_text_for_chat_template(processor, text, image_path, video_path=None, description=None, add_generation_prompt=False):
 
     formatted_sample = [
         {"role": "system",
         "content": [{"type": "text", "text": "You are a helpful assistant."}],}
     ]
-    user_content = [] if not image_path else [{"type": "image", "image": image_path}]
+    user_content = [] 
+    if image_path:
+        user_content.append({"type": "image", "image": image_path})
+    if video_path:
+        user_content.append({"type": "video", "video": video_path})
     user_content.append({"type": "text", "text": text})
     formatted_sample.append({"role": "user", "content": user_content})
 
@@ -171,6 +177,22 @@ Question: {query}"""
     elif task in {"NIGHTS"}:
         query_user_prompts_cot[task] = """Given a query image, generate a concise and informative description of what the target image may look like, then generate a summarization based on the description. Let's think step by step."""
 
+query_user_prompts_base = {}
+
+for task in VIDEO_TASKS:
+    if task in {"Kinetics-700"}:
+        query_user_prompts_base[task] = """Given a video, identify the main action or activity being performed. Let's think step by step."""
+    elif task in {"SmthSmthV2"}:
+        query_user_prompts_base[task] = """Given a video, identify the actions or object interactions being performed by the person in the video. Let's think step by step."""
+    elif task in {"UCF101"}:
+        query_user_prompts_base[task] = """Given a video, identify the activities or sports being performed by the person in the video. Let's think step by step."""
+    elif task in {"HMDB51"}:
+        query_user_prompts_base[task] = """Given a video, identify the actions or objects interactions being performed by the person in the video. Let's think step by step."""
+    elif task in {"Breakfast"}:
+        query_user_prompts_base[task] = """Given a video, recognize the breakfast type that the person is cooking in the video. Let's think step by step."""
+    elif task in {"MSR-VTT"}:
+        query_user_prompts_base[task] = """Understand the content of the provided video."""
+    
 
 target_user_prompts_cot = {}
 
@@ -208,6 +230,21 @@ News text: {query}"""
     elif task in task_categories['vqa'] | task_categories['classification']:
         target_user_prompts_cot[task] = """Represent the following text as text embeddings.
 Answer: {query}"""
+
+target_user_prompts_base = {}
+
+for task in VIDEO_TASKS:
+    if task in {"MSR-VTT"}:
+        target_user_prompts_base[task] = """Understand the content of the provided video."""
+
+
+
+target_user_prompts_cot = {}
+
+for task in VIDEO_TASKS:
+    if task in {"MSR-VTT"}:
+        target_user_prompts_cot[task] = """Understand the content of the provided video."""
+
 
 def get_query(task, query, use_cot=True):
 

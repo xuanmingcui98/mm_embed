@@ -2,10 +2,6 @@ import os
 import cv2
 import numpy as np
 
-from datasets import load_dataset
-from src.data.eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, RESOLUTION_MAPPING
-from src.data.utils.vision_utils import process_video_frames, load_frames
-
 
 # TODO: Move to a separpate config file
 BREAKFAST_LABELS = ['pancake', 'cereal', 'sandwich', 'scrambledegg', 'friedegg', 'coffee', 'milk', 'tea', 'juice', 'salad']
@@ -27,5 +23,5 @@ DATASET_INSTRUCTION = {
     'SmthSmthV2': 'What actions or object interactions are being performed by the person in the video?',
     'UCF101': 'What activities or sports are being performed by the person in the video?',
     'HMDB51': 'What actions or objects interactions are the person in the video doing?',
-    'Breakfast': 'Recognize the breakfast type that the person is cooking in the video. '
+    'Breakfast': 'Recognize the breakfast type that the person is cooking in the video. ',
 }

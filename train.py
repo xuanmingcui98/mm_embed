@@ -22,7 +22,7 @@ from transformers import HfArgumentParser, set_seed
 from src.arguments import ModelArguments, DataArguments, TrainingArguments
 from src.data.collator.train_collator import MultimodalDataCollator
 from src.data.loader.mixed_dataset import init_mixed_dataset
-from src.model.model_tmp import MMEBModel
+from src.model.model import MMEBModel
 from src.trainer import GradCacheLateProcessTrainer, MMEBTrainer
 from src.utils import print_rank, print_master, find_latest_checkpoint
 

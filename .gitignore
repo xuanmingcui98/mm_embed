@@ -58,3 +58,5 @@ wandb/*
 
 configs/train/*.yaml
 configs/eval/*.yaml
+
+*_tmp.py
