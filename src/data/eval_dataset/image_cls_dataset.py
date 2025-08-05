@@ -2,12 +2,12 @@ import os
 import sys
 
 # from datasets import load_dataset
-from src.data.eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, RESOLUTION_MAPPING, BaseEvalDatasetProcessor
+from src.data.eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, RESOLUTION_MAPPING, MMEBEvalDatasetProcessor
 from src.model.processor import process_input_text
 
 DATASET_PARSER_NAME = "image_cls"
 @AutoEvalPairDataset.register(DATASET_PARSER_NAME)
-class ImageClsEvalDatasetProcessor(BaseEvalDatasetProcessor):
+class ImageClsEvalDatasetProcessor(MMEBEvalDatasetProcessor):
     def __init__(self,                 
                  model_args, 
                  data_args, 
@@ -17,33 +17,33 @@ class ImageClsEvalDatasetProcessor(BaseEvalDatasetProcessor):
 
         super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, processor, **dataset_config)
 
-    @add_metainfo_hook
-    def batch_preprocess_bm(self, batch_dict, *args, **kwargs):
-        image_resolution, model_backbone = kwargs['image_resolution'], kwargs['model_backbone']
-        image_root = kwargs['image_root']
+    # @add_metainfo_hook
+    # def batch_preprocess_bm(self, batch_dict, *args, **kwargs):
+    #     image_resolution, model_backbone = kwargs['image_resolution'], kwargs['model_backbone']
+    #     image_root = kwargs['image_root']
 
-        query_texts, query_images, cand_texts, cand_images, dataset_infos = [], [], [], [], []
-        for qry_inst, qry_text, qry_img_path, tgt_texts in (
-                zip(batch_dict['qry_inst'], batch_dict['qry_text'], batch_dict['qry_img_path'], batch_dict['tgt_text'])):
-            qry_inst = qry_inst.replace("<|image_1|>", "")
-            qry_text = process_input_text(qry_inst, model_backbone, text=qry_text, add_image_token=True)
-            # to stay consistent with v1 eval
-            qry_text = qry_text.replace(" \n", "\n") + "\n"
-            query_texts.append([qry_text])
-            qry_img_path = os.path.join(image_root, qry_img_path)
-            query_images.append([{"bytes": [None], "paths": [qry_img_path],
-                                "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]}])
+    #     query_texts, query_images, cand_texts, cand_images, dataset_infos = [], [], [], [], []
+    #     for qry_inst, qry_text, qry_img_path, tgt_texts in (
+    #             zip(batch_dict['qry_inst'], batch_dict['qry_text'], batch_dict['qry_img_path'], batch_dict['tgt_text'])):
+    #         qry_inst = qry_inst.replace("<|image_1|>", "")
+    #         qry_text = process_input_text(qry_inst, model_backbone, text=qry_text, add_image_token=True)
+    #         # to stay consistent with v1 eval
+    #         qry_text = qry_text.replace(" \n", "\n") + "\n"
+    #         query_texts.append([qry_text])
+    #         qry_img_path = os.path.join(image_root, qry_img_path)
+    #         query_images.append([{"bytes": [None], "paths": [qry_img_path],
+    #                             "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]}])
 
-            cand_texts.append(tgt_texts)
-            cand_images.append([None] * len(tgt_texts))
-            dataset_infos.append({
-                "cand_names": tgt_texts,
-                "label_name": tgt_texts[0],
-            })
+    #         cand_texts.append(tgt_texts)
+    #         cand_images.append([None] * len(tgt_texts))
+    #         dataset_infos.append({
+    #             "cand_names": tgt_texts,
+    #             "label_name": tgt_texts[0],
+    #         })
 
-        return {"query_text": query_texts, "query_image": query_images,
-                "cand_text": cand_texts, "cand_image": cand_images,
-                "dataset_infos": dataset_infos}
+    #     return {"query_text": query_texts, "query_image": query_images,
+    #             "cand_text": cand_texts, "cand_image": cand_images,
+    #             "dataset_infos": dataset_infos}
 
 
 # DATASET_PARSER_NAME = "image_cls"

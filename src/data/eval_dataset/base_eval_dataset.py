@@ -162,6 +162,9 @@ def generate_cand_dataset(dataset, corpus):
     cand_dataset = Dataset.from_list(cand_rows)
     return cand_dataset
 
+
+
+
 class BaseEvalDatasetProcessor:
 
     def __init__(self,
@@ -194,33 +197,24 @@ class BaseEvalDatasetProcessor:
             if os.path.exists(desc_path):
                 with open(desc_path, "rb") as f:
                     self.query_descriptions = pickle.load(f)
-                # for MMEB v2, the query text doesn't include instructions, so we need to take the instruction part out from the description
-                self.query_descriptions = {
-                    (extract_query_from_mmeb(qry_text, self.subset_name), qry_image_path): desc \
-                    for (qry_text, qry_image_path), desc in self.query_descriptions.items()
-                }
+
 
         if data_args.target_description_dir is not None and not model_args.do_sft_target:
             desc_path = os.path.join(data_args.target_description_dir, self.subset_name, "cot", "target.pkl")
             if os.path.exists(desc_path):
                 with open(desc_path, "rb") as f:
                     self.target_descriptions = pickle.load(f)
-                # for MMEB v2, the target text doesn't include instructions, so we need to take the instruction part out from the description
-                self.target_descriptions = {
-                    (extract_target_from_mmeb(tgt_text, self.subset_name), tgt_image_path): desc \
-                    for (tgt_text, tgt_image_path), desc in self.target_descriptions.items()
-                }
 
         if self.subset_name in IMAGE_TASKS:
             dataset_path_key = "IMAGE_TASKS"  
-            subset_name = self.subset_name
+            self.load_subset_name = self.subset_name
         else:
             dataset_path_key = self.subset_name
-            subset_name = None
+            self.load_subset_name = None
 
         repo_subset_split = EVAL_DATASET_HF_PATH[dataset_path_key]
         self.dataset_name = repo_subset_split[0]
-        self.dataset = load_hf_dataset(repo_subset_split, subset_name=subset_name)
+        self.dataset = self._load_hf_dataset()
         self.dataset = sample_dataset(self.dataset, **dataset_config)
 
         self.corpus = self.prepare_corpus()
@@ -238,6 +232,9 @@ class BaseEvalDatasetProcessor:
                                 batch_size=256, num_proc=4,
                                 drop_last_batch=False, load_from_cache_file=False)
         self.dataset = self.dataset.select_columns(["query_text", "query_image", "cand_text", "cand_image", "dataset_infos"])
+
+    def _load_hf_dataset(self):
+        return load_hf_dataset(self.dataset_name, subset_name=self.load_subset_name)
 
     def load(self):
         return self.dataset, self.corpus
@@ -376,4 +373,40 @@ class BaseEvalDatasetProcessor:
         return {"query_text": query_texts, "query_image": query_images,
                 "cand_text": cand_texts, "cand_image": cand_images,
                 "dataset_infos": dataset_infos}
+
+
+class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
+    """
+    MMEB evaluation dataset processor.
+    It processes the dataset for MMEB evaluation tasks, including query and target descriptions.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.data_parser_name = "mmeb_eval"
+        self.subset_name = self.dataset_config.get("dataset_name")
+        self.dataset_split = self.dataset_config.get("dataset_split", "test")
+
+        # for MMEB v2, the query text doesn't include instructions, so we need to take the instruction part out from the description
+        if self.query_descriptions is not None:
+            self.query_descriptions = {
+                (extract_query_from_mmeb(qry_text, self.subset_name), qry_image_path): desc \
+                for (qry_text, qry_image_path), desc in self.query_descriptions.items()
+            }
+        if self.target_descriptions is not None:
+            self.target_descriptions = {
+                (extract_target_from_mmeb(tgt_text, self.subset_name), tgt_image_path): desc \
+                for (tgt_text, tgt_image_path), desc in self.target_descriptions.items()
+            }
+
+
+
+class VideoEvalDatasetProcessor(BaseEvalDatasetProcessor):
+    def __init__(self, data_parser_name, model_args, data_args, training_args, processor, **dataset_config):
+        super().__init__(data_parser_name, model_args, data_args, training_args, processor, **dataset_config)
+
+        num_frames, max_frames_saved = dataset_config['num_frames'], dataset_config['max_frames_saved']
+        video_root, frame_root = dataset_config['video_root'], dataset_config['frame_root']
+
+
 

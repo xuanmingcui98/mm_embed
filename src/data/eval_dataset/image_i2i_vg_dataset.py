@@ -2,12 +2,12 @@ import os
 import sys
 
 from datasets import load_dataset
-from src.data.eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, RESOLUTION_MAPPING, BaseEvalDatasetProcessor
+from src.data.eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, RESOLUTION_MAPPING, MMEBEvalDatasetProcessor
 from src.model.processor import process_input_text
 
 DATASET_PARSER_NAME = "image_i2i_vg"
 @AutoEvalPairDataset.register(DATASET_PARSER_NAME)
-class ImageI2IVGEvalDatasetProcessor(BaseEvalDatasetProcessor):
+class ImageI2IVGEvalDatasetProcessor(MMEBEvalDatasetProcessor):
     def __init__(self,                 
                  model_args, 
                  data_args, 
@@ -17,51 +17,51 @@ class ImageI2IVGEvalDatasetProcessor(BaseEvalDatasetProcessor):
 
         super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, processor, **dataset_config)
 
-    @add_metainfo_hook
-    def batch_preprocess_bm(self, batch_dict, *args, **kwargs):
-        image_resolution, model_backbone = kwargs['image_resolution'], kwargs['model_backbone']
-        image_root = kwargs['image_root']
+    # @add_metainfo_hook
+    # def batch_preprocess_bm(self, batch_dict, *args, **kwargs):
+    #     image_resolution, model_backbone = kwargs['image_resolution'], kwargs['model_backbone']
+    #     image_root = kwargs['image_root']
 
-        query_texts, query_images, cand_texts, cand_images, dataset_infos = [], [], [], [], []
-        for qry_inst, qry_text, qry_img_path, tgt_inst, tgt_captions, tgt_img_paths in (
-                zip(batch_dict['qry_inst'], batch_dict['qry_text'], batch_dict['qry_img_path'], batch_dict['tgt_inst'], batch_dict['tgt_text'], batch_dict['tgt_img_path'])):
-            qry_inst = "\n" + qry_inst.replace("<|image_1|>", "").strip()
-            qry_text = process_input_text(qry_inst, model_backbone, text=qry_text, add_image_token=True)
-            # to stay consistent with v1 eval
-            qry_text = qry_text.replace(" \n", "\n") + "\n"
-            query_texts.append([qry_text])
-            qry_img_path = os.path.join(image_root, qry_img_path)
-            query_images.append([{"bytes": [None], "paths": [qry_img_path],
-                                "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]}])
+    #     query_texts, query_images, cand_texts, cand_images, dataset_infos = [], [], [], [], []
+    #     for qry_inst, qry_text, qry_img_path, tgt_inst, tgt_captions, tgt_img_paths in (
+    #             zip(batch_dict['qry_inst'], batch_dict['qry_text'], batch_dict['qry_img_path'], batch_dict['tgt_inst'], batch_dict['tgt_text'], batch_dict['tgt_img_path'])):
+    #         qry_inst = "\n" + qry_inst.replace("<|image_1|>", "").strip()
+    #         qry_text = process_input_text(qry_inst, model_backbone, text=qry_text, add_image_token=True)
+    #         # to stay consistent with v1 eval
+    #         qry_text = qry_text.replace(" \n", "\n") + "\n"
+    #         query_texts.append([qry_text])
+    #         qry_img_path = os.path.join(image_root, qry_img_path)
+    #         query_images.append([{"bytes": [None], "paths": [qry_img_path],
+    #                             "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]}])
 
-            # subtle target side processing, to stay consistent with v1 eval
-            if tgt_captions[0].strip():  # RefCOCO-Matching has valid text inputs
-                tgt_inst = tgt_inst.replace("<|image_1|>", "")
-                tgt_inst_captions = []
-                for tgt_cap in tgt_captions:
-                    tgt_inst_caption = process_input_text(tgt_inst + ' ' + tgt_cap, model_backbone, text='', add_image_token=True)
-                    tgt_inst_caption = tgt_inst_caption.replace(" \n", "\n") + '\n'
-                    tgt_inst_captions.append(tgt_inst_caption)
-                cand_texts.append(tgt_inst_captions)
-            else:
-                tgt_inst = tgt_inst.replace("<|image_1|>", "")
-                tgt_inst_caption = process_input_text(tgt_inst, model_backbone, text='', add_image_token=True)
-                tgt_inst_caption = tgt_inst_caption.replace(" \n", "\n")  # to stay consistent with v1 eval
-                cand_texts.append([tgt_inst_caption] * len(tgt_img_paths))
-            cand_img_paths = [os.path.join(image_root, tgt_img_path) for tgt_img_path in tgt_img_paths]
-            img_list = [{"bytes": [None], "paths": [cand_img_path],
-                        "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]} for cand_img_path in cand_img_paths]
-            cand_images.append(img_list)
-            # this is used for dedup, especially important for RefCOCO-Matching, as multiple objects in the same image can be targets, so we need to use path+caption as key
-            cand_names = [path+':'+cap.strip('"') for path, cap in zip(tgt_img_paths, tgt_captions)]
-            dataset_infos.append({
-                "cand_names": cand_names,
-                "label_name": cand_names[0],
-            })
+    #         # subtle target side processing, to stay consistent with v1 eval
+    #         if tgt_captions[0].strip():  # RefCOCO-Matching has valid text inputs
+    #             tgt_inst = tgt_inst.replace("<|image_1|>", "")
+    #             tgt_inst_captions = []
+    #             for tgt_cap in tgt_captions:
+    #                 tgt_inst_caption = process_input_text(tgt_inst + ' ' + tgt_cap, model_backbone, text='', add_image_token=True)
+    #                 tgt_inst_caption = tgt_inst_caption.replace(" \n", "\n") + '\n'
+    #                 tgt_inst_captions.append(tgt_inst_caption)
+    #             cand_texts.append(tgt_inst_captions)
+    #         else:
+    #             tgt_inst = tgt_inst.replace("<|image_1|>", "")
+    #             tgt_inst_caption = process_input_text(tgt_inst, model_backbone, text='', add_image_token=True)
+    #             tgt_inst_caption = tgt_inst_caption.replace(" \n", "\n")  # to stay consistent with v1 eval
+    #             cand_texts.append([tgt_inst_caption] * len(tgt_img_paths))
+    #         cand_img_paths = [os.path.join(image_root, tgt_img_path) for tgt_img_path in tgt_img_paths]
+    #         img_list = [{"bytes": [None], "paths": [cand_img_path],
+    #                     "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]} for cand_img_path in cand_img_paths]
+    #         cand_images.append(img_list)
+    #         # this is used for dedup, especially important for RefCOCO-Matching, as multiple objects in the same image can be targets, so we need to use path+caption as key
+    #         cand_names = [path+':'+cap.strip('"') for path, cap in zip(tgt_img_paths, tgt_captions)]
+    #         dataset_infos.append({
+    #             "cand_names": cand_names,
+    #             "label_name": cand_names[0],
+    #         })
 
-        return {"query_text": query_texts, "query_image": query_images,
-                "cand_text": cand_texts, "cand_image": cand_images,
-                "dataset_infos": dataset_infos}
+    #     return {"query_text": query_texts, "query_image": query_images,
+    #             "cand_text": cand_texts, "cand_image": cand_images,
+    #             "dataset_infos": dataset_infos}
 
 
 # DATASET_PARSER_NAME = "image_i2i_vg"
