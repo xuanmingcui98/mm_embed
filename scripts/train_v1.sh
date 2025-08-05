@@ -12,7 +12,7 @@ set -e
 
 echo "NODELIST="${SLURM_NODELIST}
 echo "SLURM_GPUS_ON_NODE="$SLURM_GPUS_ON_NODE
-master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
+master_addr=$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)
 export MASTER_ADDR=$master_addr
 echo "MASTER_ADDR="$MASTER_ADDR
 export MASTER_PORT=12341
@@ -22,10 +22,10 @@ export TORCH_DISTRIBUTED_DEFAULT_TIMEOUT=3600
 NNODES=$SLURM_NNODES
 GPU_PER_NODE=$SLURM_GPUS_ON_NODE
 
-source /home/xuanmingcui/miniconda3/etc/profile.d/conda.sh
+source /home/jianpengcheng/miniconda3/etc/profile.d/conda.sh
 conda activate def
 
-EXP_NAME="qwen2-2b_v2_imageonly_chat_lr2e-4_meta_queries16_8x8_${SLURM_JOB_ID}"
+EXP_NAME="qwen2-2b_v2_imageonly_chat_lr2e-4_ntokens16_8x8_${SLURM_JOB_ID}"
 EXP_DIR="runs/$EXP_NAME"
 
 rdzv_id=$RANDOM
@@ -37,9 +37,10 @@ mkdir -p $EXP_DIR
 srun torchrun --nnodes $NNODES --nproc_per_node $GPU_PER_NODE --rdzv_id=$rdzv_id --rdzv_backend c10d --rdzv_endpoint $MASTER_ADDR:$MASTER_PORT \
      train.py \
      --apply_chat_template True \
-     --meta_queries 16 \
-     --lora --lora_r 16 --model_name Qwen/Qwen2-VL-2B-Instruct --bf16 --pooling_module eos --normalize True \
-     --temperature 0.02 --dataloader_num_workers 4 --dataset_config configs/train/train_image.yaml \
+     --meta_queries 8 \
+     --lora --lora_r 16 --model_name Qwen/Qwen2-VL-2B-Instruct --bf16 --pooling_module meta_queries --meta_queries_aggregate_type concat \
+     --normalize True \
+     --temperature 0.02 --dataloader_num_workers 4 --dataset_config configs/train/train_alltasks.yaml \
      --run_name $EXP_NAME --output_dir $EXP_DIR --grad_cache True --per_device_train_batch_size 128 \
      --gc_q_chunk_size 8 --gc_p_chunk_size 8 --interleave_batch_size 0.0625 --lr_scheduler_type linear \
      --learning_rate 2e-4 --num_train_epochs 1 --warmup_ratio 0.05 --save_steps 100 --logging_steps 1 \

@@ -23,7 +23,7 @@ from src.arguments import ModelArguments, DataArguments, TrainingArguments
 from src.data.collator.eval_collator import MultimodalEvalDataCollator
 from src.data.eval_dataset.base_eval_dataset import AutoEvalPairDataset, generate_cand_dataset
 from src.eval_utils.metrics import RankingMetrics
-from src.model.model_tmp import MMEBModel
+from src.model.model import MMEBModel
 from src.model.processor import get_backbone_name, load_processor, COLPALI
 from src.utils import batch_to_device, print_rank, print_master
 import multiprocessing
