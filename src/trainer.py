@@ -838,10 +838,11 @@ class GradCacheLateProcessTrainer(MMEBTrainer):
     def training_step(self, model, inputs, *args, **kwargs) -> torch.Tensor:
         model.train()
         queries, targets = inputs
-        # queries = batch_to_device(queries, model.device)
-        # targets = batch_to_device(targets, model.device)
-        queries = batch_to_device(queries, "cuda")
-        targets = batch_to_device(targets, "cuda")
+        queries = batch_to_device(queries, model.device)
+        targets = batch_to_device(targets, model.device)
+        # device = next(model.parameters()).device
+        # queries = batch_to_device(queries, device)
+        # targets = batch_to_device(targets, device)
         queries, targets = {'qry': queries}, {'tgt': targets}
 
         _distributed = self.args.local_rank > -1

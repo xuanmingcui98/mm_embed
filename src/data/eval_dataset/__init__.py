@@ -1,27 +1,27 @@
 # Video Classification
-from .video_classification_datasets import load_video_class_dataset
-from .ssv2_dataset import load_ssv2_dataset
+from .video_classification_datasets import VideoClassificationEvalDatasetProcessor
+from .ssv2_dataset import SSV2EvalDatasetProcessor
 
 # Video QA
-from .videomme_dataset import load_videomme_dataset
-from .mvbench_dataset import load_mvbench_dataset
-from .nextqa_dataset import load_nextqa_dataset
-from .egoschema_dataset import load_egoschema_dataset
-from .activitynetqa_dataset import load_activitynetqa_dataset
-from .videommmu_dataset import load_videommmu_dataset
+from .videomme_dataset import VideoMMMEvalDatasetProcessor
+from .mvbench_dataset import MVBenchEvalDatasetProcessor
+from .nextqa_dataset import NextQAEvalDatasetProcessor
+from .egoschema_dataset import EgoSchemaEvalDatasetProcessor
+from .activitynetqa_dataset import ActivityNetQAEvalDatasetProcessor
+from .videommmu_dataset import VideoMMMUEvalDatasetProcessor
 
 # Video Retrieval
-from .msrvtt_dataset import load_msrvtt_dataset
-from .didemo_dataset import load_didemo_dataset
-from .msvd_dataset import load_msvd_dataset
-from .youcook2_dataset import load_youcook2_dataset
-from .vatex_dataset import load_vatex_dataset
+from .msrvtt_dataset import MSRVTTEvalDatasetProcessor
+from .didemo_dataset import DiDemoEvalDatasetProcessor
+from .msvd_dataset import MSVDEvalDatasetProcessor
+from .youcook2_dataset import YouCook2EvalDatasetProcessor
+from .vatex_dataset import VatexEvalDatasetProcessor
 
-from .gui_dataset import load_gui_dataset
+from .gui_dataset import GuiEvalDatasetProcessor
 
 # Temporal Grounding
-from .moment_retrieval_datasets import load_moment_retrieval_dataset
-from .momentseeker_dataset import load_momentseeker_dataset
+from .moment_retrieval_datasets import MomentRetrievalEvalDatasetProcessor
+from .momentseeker_dataset import MomentSeekerEvalDatasetProcessor
 
 # MMEB
 # from .image_cls_dataset import load_image_cls_dataset
@@ -37,5 +37,5 @@ from .image_i2t_eval import ImageI2TEvalDatasetProcessor
 from .image_i2i_vg_dataset import ImageI2IVGEvalDatasetProcessor
 
 # VisDoc
-from .vidore_dataset import load_vidore_dataset
-from .visrag_dataset import load_visrag_dataset
+from .vidore_dataset import VidoreEvalDatasetProcessor
+from .visrag_dataset import VisRAGEvalDatasetProcessor

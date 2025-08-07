@@ -60,3 +60,5 @@ configs/train/*.yaml
 configs/eval/*.yaml
 
 *_tmp.py
+test.ipynb
+src/data_orig/*

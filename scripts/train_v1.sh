@@ -1,10 +1,10 @@
 #!/bin/bash
 
-#SBATCH --job-name=fullbm
-#SBATCH --nodes=8
-#SBATCH --cpus-per-task=12
+#SBATCH --job-name=v2
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=96
 #SBATCH --gres=gpu:8
-#SBATCH -t 2-0
+#SBATCH -t 1-0
 #SBATCH --account=all
 
 

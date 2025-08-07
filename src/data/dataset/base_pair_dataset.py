@@ -11,6 +11,7 @@ from ..prompts import (get_query, get_target,
 from src.data.utils.dataset_utils import sample_dataset
 from src.data.utils.vision_utils import save_frames, load_frames, sample_frames
 from src.model.processor import process_input_text
+import torch
 
 DATASET_INSTRUCTION = {
     'Kinetics-700': 'Recognize the category of the video content.',
@@ -167,8 +168,9 @@ class BaseDatasetProcessor:
         self.column_names = self.dataset.column_names
         self.dataset = sample_dataset(self.dataset, **dataset_config)
         num_rows = self.dataset.num_rows
-        num_shards = self.training_args.dataloader_num_workers if self.training_args.dataloader_num_workers > 0 else 1
-        self.dataset = self.dataset.to_iterable_dataset(num_shards=num_shards)  # convert to IterableDataset and multiple shards
+        world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
+         # self.training_args.dataloader_num_workers if self.training_args.dataloader_num_workers > 0 else 1
+        self.dataset = self.dataset.to_iterable_dataset(num_shards=world_size * self.training_args.dataloader_num_workers)
         setattr(self.dataset, 'num_rows', num_rows)
 
     def load(self):
@@ -184,8 +186,9 @@ class BaseDatasetProcessor:
                             lambda x:
                             self.batch_preprocess(x, data_args=self.data_args, model_args=self.model_args, processor=self.processor, **self.dataset_config),
                             batched=True, 
-                            batch_size=2048,
-                            remove_columns=columns_to_remove)
+                            batch_size=64,
+                            remove_columns=columns_to_remove,
+                            )
 
         self.dataset = self.dataset.cast(MULTIMODAL_FEATURES)
 
