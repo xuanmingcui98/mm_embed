@@ -170,7 +170,7 @@ class BaseDatasetProcessor:
         num_rows = self.dataset.num_rows
         world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
          # self.training_args.dataloader_num_workers if self.training_args.dataloader_num_workers > 0 else 1
-        self.dataset = self.dataset.to_iterable_dataset(num_shards=world_size * self.training_args.dataloader_num_workers)
+        self.dataset = self.dataset.to_iterable_dataset(num_shards=world_size)
         setattr(self.dataset, 'num_rows', num_rows)
 
     def load(self):
