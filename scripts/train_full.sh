@@ -25,7 +25,7 @@ GPU_PER_NODE=$SLURM_GPUS_ON_NODE
 source /home/xuanmingcui/miniconda3/etc/profile.d/conda.sh
 conda activate def
 
-EXP_NAME="qwen2-2b_v2_full_bm_lr2e-4_bs256_1epochs_4x8_${SLURM_JOB_ID}"
+EXP_NAME="qwen2-2b_v2_full_bm_lr2e-4_bs128_1epochs_8x8_${SLURM_JOB_ID}"
 EXP_DIR="runs/$EXP_NAME"
 
 rdzv_id=$RANDOM
@@ -40,8 +40,8 @@ srun torchrun --max_restarts=0 --nnodes $NNODES --nproc_per_node $GPU_PER_NODE -
      --apply_chat_template False \
      --lora --lora_r 16 --model_name Qwen/Qwen2-VL-2B-Instruct --bf16 --pooling_module eos --normalize True \
      --temperature 0.02 --dataloader_num_workers 8 --dataset_config configs/train/train_alltasks.yaml \
-     --run_name $EXP_NAME --output_dir $EXP_DIR --grad_cache True --per_device_train_batch_size 256 \
-     --gc_q_chunk_size 4 --gc_p_chunk_size 4 --interleave_batch_size 0.0625 --lr_scheduler_type linear \
+     --run_name $EXP_NAME --output_dir $EXP_DIR --grad_cache True --per_device_train_batch_size 128 \
+     --gc_q_chunk_size 2 --gc_p_chunk_size 2 --interleave_batch_size 0.0625 --lr_scheduler_type linear \
      --learning_rate 2e-4 --num_train_epochs 1 --warmup_ratio 0.05 --save_steps 100 --logging_steps 1 \
      --save_safetensors True --remove_unused_columns False --resume_from auto --report_to wandb 2>&1 | tee $EXP_DIR/train.log
 
