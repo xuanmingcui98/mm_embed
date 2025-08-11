@@ -195,3 +195,7 @@ def get_result_summary():
 
 
     print("\nProcessing complete.")
+
+
+if __name__ == "__main__":
+    get_result_summary()
