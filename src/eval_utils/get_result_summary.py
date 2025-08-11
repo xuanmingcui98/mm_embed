@@ -9,14 +9,12 @@ import argparse
 # ==> Unified list of experiments to process.
 # Fill in the metadata for each experiment. `None` will become `null` in the JSON.
 
-def get_result_summary():
-    parser = argparse.ArgumentParser(description="Process VLM2Vec experiment results.")
-    parser.add_argument('--dir', type=str, required=True, help='Directory containing the experiment results')
-    args = parser.parse_args()
+def get_result_summary(dir):
+
 
     EXPERIMENTS = [
         {
-            "path": args.dir,  # Directory containing the experiment results
+            "path": dir,  # Directory containing the experiment results
             "metadata": {
                 "model_name": "VLM2Vec-Qwen2VL-V2.0-2B",
                 "model_size": "2B parameters",
@@ -198,4 +196,7 @@ def get_result_summary():
 
 
 if __name__ == "__main__":
-    get_result_summary()
+    parser = argparse.ArgumentParser(description="Process VLM2Vec experiment results.")
+    parser.add_argument('--dir', type=str, required=True, help='Directory containing the experiment results')
+    args = parser.parse_args()
+    get_result_summary(args.dir)
