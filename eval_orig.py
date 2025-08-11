@@ -30,7 +30,7 @@ import multiprocessing
 from multiprocessing import Pool, cpu_count
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s [%(name)s:%(lineno)s] %(message)s')
 logger = logging.getLogger(__name__)
-from src.eval_utils import get_result_summary
+from src.eval_utils.get_result_summary import  
 
 
 def pad_dataset_to_divisible(dataset, world_size):

@@ -236,7 +236,7 @@ class GradCache:
         :param no_sync_except_last: If True, under distributed setup, only trigger gradient reduction across processes
         for the last sub-batch's forward-backward pass.
         """
-        if no_sync_except_last:
+        if no_sync_except_last and False:
             sync_contexts = [model.no_sync for _ in range(len(model_inputs) - 1)] + [nullcontext]
         else:
             sync_contexts = [nullcontext for _ in range(len(model_inputs))]
