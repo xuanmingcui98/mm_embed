@@ -4,7 +4,7 @@ from datasets.features.image import image_to_bytes
 import io
 
 from torch.jit import isinstance
-from src.data.dataset.base_pair_dataset import AutoPairDataset, add_metainfo_hook, MULTIMODAL_FEATURES, \
+from ..dataset.base_pair_dataset import AutoPairDataset, add_metainfo_hook, MULTIMODAL_FEATURES, \
     RESOLUTION_MAPPING, VideoDatasetProcessor
 from src.model.processor import VLM_IMAGE_TOKENS
 
@@ -16,11 +16,19 @@ def process_query(query, prompt, image_token):
         query = f'{image_token} {query}'
     return query
 
+TASK_INST_TGT = "Represent the following text:\n"
+
+
 DATASET_PARSER_NAME = "vidore"
 @AutoPairDataset.register(DATASET_PARSER_NAME)
 class VidoReDatasetProcessor(VideoDatasetProcessor):
     def __init__(self, model_args, data_args, training_args, **kwargs):
-        super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, **kwargs)
+        super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args,
+                         query_key_text="query",
+                         query_key_mm="image_filename",
+                         cand_key_text="answer",
+                         cand_key_mm=None,
+                         **kwargs)
 
     def _load_hf_dataset(self):
         kwargs = self.dataset_config
@@ -34,39 +42,83 @@ class VidoReDatasetProcessor(VideoDatasetProcessor):
             dataset = load_dataset("parquet", data_files=dataset_path, split="train")
         return dataset
 
-    @add_metainfo_hook
-    def batch_preprocess(self, batch_dict, *args, **kwargs):
+    # def _add_signature_columns_map_func(self, batch_dict):
+    #     signature_columns = {
+    #         "query_key_text": batch_dict['query'],
+    #         "query_key_mm": batch_dict['image_filename'],
+    #         "cand_key_text": batch_dict['answer'],
+    #         "cand_key_mm": [""] * len(batch_dict['query'])}
+    #     return batch_dict | signature_columns
+    
+    def _process_one_sample(self, idx, batch_dict, *args, **kwargs):
         model_backbone = kwargs['model_backbone']
         image_resolution = kwargs['image_resolution']
-        batch_size = len(batch_dict['query'])
-        query_texts, query_images, pos_texts, pos_images, neg_texts, neg_images = [], [], [], [], [], []
-        for query, prompt, image, image_filename, answer, answer_type, source in \
-            zip(batch_dict['query'], batch_dict['prompt'], batch_dict['image'], batch_dict['image_filename'], batch_dict['answer'], batch_dict['answer_type'], batch_dict['source']):
-            # ignore prompt since most prompts too long
-            query = process_query(query, prompt="", image_token=VLM_IMAGE_TOKENS[model_backbone])
-            # query = process_query(query, prompt=prompt, image_token=VLM_IMAGE_TOKENS[model_backbone])
-            query_texts.append(query)
-            pos_texts.append(answer)
-            neg_texts.append("")
-            if isinstance(image, Image.Image):
-                # BC, datasets==2.21.0
-                image_bytes = image_to_bytes(image)
-                path = image_filename
-            elif type(image) is dict:
-                # datasets==3.3.2
-                image_bytes = image['bytes']
-                path = image['path']
-            else:
-                raise ValueError(f"Unsupported image type: {type(image)}")
-            query_images.append({"bytes": [image_bytes], "paths": [path], "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]})
-            pos_images.append(None)
-            neg_images.append(None)
-        if len(query_texts) == 0:
-            print('something went wrong')
-        # print_rank(f"global_dataset_name={kwargs.get('global_dataset_name', DATASET_PARSER_NAME)}, batch_size={batch_size}, processed_batch_size={len(query_texts)}")
-        return {"query_text": query_texts, "query_image": query_images,
-                "pos_text": pos_texts, "pos_image": pos_images,
-                "neg_text": neg_texts, "neg_image": neg_images}
+
+        query, prompt, image, image_filename, answer, answer_type, source = \
+            batch_dict['query'][idx], batch_dict['prompt'][idx], batch_dict['image'][idx], \
+            batch_dict['image_filename'][idx], batch_dict['answer'][idx], batch_dict['answer_type'][idx], batch_dict['source'][idx]
+        query = process_query(query, prompt=prompt, image_token=VLM_IMAGE_TOKENS[model_backbone])
+        if isinstance(image, Image.Image):
+            # BC, datasets==2.21.0
+            image_bytes = image_to_bytes(image)
+            path = image_filename
+        elif type(image) is dict:
+            # datasets==3.3.2
+            image_bytes = image['bytes']
+            path = image['path']
+        else:
+            raise ValueError(f"Unsupported image type: {type(image)}")
+
+        if self.data_args.apply_chat_template:
+            answer = TASK_INST_TGT + answer
+        return {
+            "query_text": query,
+            "query_image": {"bytes": [image_bytes], "paths": [path], "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]},
+            "pos_text": answer,
+            "pos_image": None,
+            "neg_text": "",
+            "neg_image": None
+        }
+
+    # @add_metainfo_hook
+    # def batch_preprocess(self, batch_dict, *args, **kwargs):
+    #     model_backbone = kwargs['model_backbone']
+    #     image_resolution = kwargs['image_resolution']
+    #     batch_size = len(batch_dict['query'])
+    #     query_texts, query_images, pos_texts, pos_images, neg_texts, neg_images = [], [], [], [], [], []
+    #     for query, prompt, image, image_filename, answer, answer_type, source in \
+    #         zip(batch_dict['query'], batch_dict['prompt'], batch_dict['image'], batch_dict['image_filename'], batch_dict['answer'], batch_dict['answer_type'], batch_dict['source']):
+    #         # ignore prompt since most prompts too long
+
+    #         query = process_query(query, prompt="", image_token=VLM_IMAGE_TOKENS[model_backbone])
+    #         # query = process_query(query, prompt=prompt, image_token=VLM_IMAGE_TOKENS[model_backbone])
+
+    #         if self.data_args.apply_chat_template:
+    #             query = self.format_text_for_chat_template(is_query=True, text=query, image_path=image_filename, key=(query, image_filename))
+    #             answer = self.format_text_for_chat_template(is_query=False, text=answer, key=(answer, image_filename))
+
+    #         query_texts.append(query)
+    #         pos_texts.append(answer)
+    #         neg_texts.append("")
+    #         if isinstance(image, Image.Image):
+    #             # BC, datasets==2.21.0
+    #             image_bytes = image_to_bytes(image)
+    #             path = image_filename
+    #         elif type(image) is dict:
+    #             # datasets==3.3.2
+    #             image_bytes = image['bytes']
+    #             path = image['path']
+    #         else:
+    #             raise ValueError(f"Unsupported image type: {type(image)}")
+    #         query_images.append({"bytes": [image_bytes], "paths": [path], "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]})
+    #         pos_images.append(None)
+    #         neg_images.append(None)
+    #     if len(query_texts) == 0:
+    #         print('something went wrong')
+    #     # print_rank(f"global_dataset_name={kwargs.get('global_dataset_name', DATASET_PARSER_NAME)}, batch_size={batch_size}, processed_batch_size={len(query_texts)}")
+    #     return {"query_text": query_texts, "query_image": query_images,
+    #             "pos_text": pos_texts, "pos_image": pos_images,
+    #             "neg_text": neg_texts, "neg_image": neg_images}
 
 
 # DATASET_PARSER_NAME = "vidore"

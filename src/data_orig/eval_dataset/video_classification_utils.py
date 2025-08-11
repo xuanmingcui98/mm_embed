@@ -3,8 +3,8 @@ import cv2
 import numpy as np
 
 from datasets import load_dataset
-from src.data.eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, RESOLUTION_MAPPING
-from src.data.utils.vision_utils import process_video_frames, load_frames
+from ..eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, RESOLUTION_MAPPING
+from ..utils.vision_utils import process_video_frames, load_frames
 
 
 # TODO: Move to a separpate config file

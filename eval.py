@@ -186,8 +186,6 @@ def main():
     args = args | vars(eval_args)  
     model_args, data_args, training_args = parser.parse_dict(args)
         
-    output_path = os.path.join(model_args.checkpoint_path, "eval")
-    os.makedirs(output_path, exist_ok=True)
 
     # --- Model Loading ---
     hf_config = AutoConfig.from_pretrained(model_args.model_name, trust_remote_code=True)
@@ -216,6 +214,8 @@ def main():
     with open(data_args.dataset_config, 'r') as yaml_file:
         dataset_configs = yaml.safe_load(yaml_file)
 
+    encode_output_path = os.path.join(model_args.checkpoint_path, "eval_debug2")
+    os.makedirs(encode_output_path, exist_ok=True)
     # --- Main Evaluation Loop ---
     for dataset_idx, (dataset_name, task_config) in enumerate(dataset_configs.items()):
         # 0. load dataset
@@ -223,8 +223,6 @@ def main():
             dist.barrier()
         print_master(f"--- Evaluating {dataset_name} ---")
 
-        encode_output_path = os.path.join(model_args.checkpoint_path, "eval")
-        os.makedirs(encode_output_path, exist_ok=True)
 
         query_embed_path = os.path.join(encode_output_path, f"{dataset_name}_qry")
         cand_embed_path = os.path.join(encode_output_path, f"{dataset_name}_tgt")
@@ -373,9 +371,6 @@ def main():
                 os.remove(query_embed_path)
             if os.path.exists(cand_embed_path):
                 os.remove(cand_embed_path)
-
-    from src.eval_utils.get_result_summary import get_summary
-    get_summary(output_path)
 
 
 if __name__ == "__main__":

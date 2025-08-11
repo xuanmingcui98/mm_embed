@@ -12,7 +12,7 @@ import cv2
 from ..prompts import (get_query, get_target, 
                        IMAGE_TASKS, VIDEO_TASKS, VISDOC_TASKS,
                        format_description, format_text_for_chat_template, 
-                       extract_query_from_mmeb, extract_target_from_mmeb)
+                       extract_query, extract_target)
 
 def process_query(query, prompt, video_token=''):
     if prompt:
@@ -36,22 +36,10 @@ class EgoSchemaEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                  processor, 
                  **dataset_config):
 
-        super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, processor, **dataset_config)
-
-    def add_signature_columns(self):
-        self.dataset = self.dataset.add_column("cand_key_text", self.dataset["option"])
-        self.dataset = self.dataset.add_column("cand_key_mm", [""] * len(self.dataset))
-
-    def _add_signature_columns_map_func(self, batch_dict):
-        signature_columns = {
-
-            # @xuanming we assume modality in the order of text, image, video
-            # current assume two modalities max for query and target
-            "query_key_text": batch_dict['query'],
-            "query_key_mm": [''] * len(batch_dict['video_idx']),
-            "cand_key_text": [''] * len(batch_dict['query']),
-            "cand_key_mm": [''] * len(batch_dict['query'])}
-        return batch_dict | signature_columns
+        super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, processor, 
+                            query_key_text="question", query_key_mm="video_idx",
+                            # cand_key_text
+                         **dataset_config)
 
     @add_metainfo_hook
     def batch_process(self, batch_dict, *args, **kwargs):

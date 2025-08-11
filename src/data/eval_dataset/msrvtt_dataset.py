@@ -8,7 +8,7 @@ from src.model.processor import process_input_text
 from ..prompts import (get_query, get_target, 
                        IMAGE_TASKS, VIDEO_TASKS, VISDOC_TASKS,
                        format_description, format_text_for_chat_template, 
-                       extract_query_from_mmeb, extract_target_from_mmeb)
+                       extract_query, extract_target)
 
 TASK_INST_QRY = "Find a video that contains the following visual content:"
 TASK_INST_TGT = "Understand the content of the provided video."
@@ -42,7 +42,7 @@ class MSRVTTEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         return load_hf_dataset(EVAL_DATASET_HF_PATH[self.dataset_config['dataset_name']]), None
 
     @add_metainfo_hook
-    def batch_process(self, batch_dict, **kwargs):
+    def batch_preprocess(self, batch_dict, **kwargs):
         image_resolution, model_backbone = kwargs['image_resolution'], kwargs['model_backbone']
         num_frames, max_frames_saved = kwargs['num_frames'], kwargs['max_frames_saved']
         video_root, frame_root = kwargs['video_root'], kwargs['frame_root']

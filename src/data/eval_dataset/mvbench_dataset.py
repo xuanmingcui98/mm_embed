@@ -19,7 +19,7 @@ from torchvision.transforms.functional import InterpolationMode
 from ..prompts import (get_query, get_target, 
                        IMAGE_TASKS, VIDEO_TASKS, VISDOC_TASKS,
                        format_description, format_text_for_chat_template, 
-                       extract_query_from_mmeb, extract_target_from_mmeb)
+                       extract_query, extract_target)
 
 def process_query(query, prompt, video_token=''):
     if prompt:
@@ -106,7 +106,7 @@ def read_frame(transform, video_path, bound=None, fps=3):
 
 decord_method_map = {'video': read_video, 'gif': read_gif, 'frame': read_frame}
 TASK_INST_QRY = "Given a video and a question, select the most accurate answer from the provided candidates. Return only the exact text of your chosen answer. Question: "
-TASK_INST_TGT = "Represent the following text answer to a question.\nAnswer: "
+TASK_INST_TGT = "Represent the following text:\n"
 
 DATASET_PARSER_NAME = "mvbench"
 DATASET_HF_PATH = "OpenGVLab/MVBench"

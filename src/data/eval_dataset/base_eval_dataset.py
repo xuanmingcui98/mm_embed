@@ -8,7 +8,7 @@ from src.utils import print_master, print_rank
 from ..prompts import (get_query, get_target, 
                        IMAGE_TASKS, VIDEO_TASKS, VISDOC_TASKS,
                        format_description, format_text_for_chat_template, 
-                       extract_query_from_mmeb, extract_target_from_mmeb)
+                       extract_query, extract_target)
 import torch
 from src.model.processor import process_input_text
 from ..utils.dataset_utils import load_hf_dataset, sample_dataset
@@ -172,7 +172,9 @@ class BaseEvalDatasetProcessor:
                  model_args, 
                  data_args, 
                  training_args, 
-                 processor, 
+                 processor,
+                 query_key_text=None, query_key_mm=None,
+                 cand_key_text=None, cand_key_mm=None,
                  **dataset_config):
         self.model_args = model_args
         self.data_args = data_args
@@ -180,6 +182,10 @@ class BaseEvalDatasetProcessor:
         self.processor = processor
         self.dataset_config = dataset_config
         self.data_parser_name = data_parser_name
+        self.query_key_text = query_key_text
+        self.query_key_mm = query_key_mm
+        self.cand_key_text = cand_key_text
+        self.cand_key_mm = cand_key_mm
 
         self.dataset_name = self.dataset_config.get("dataset_name")
         self.dataset_split = self.dataset_config.get("dataset_split", "test")
@@ -210,25 +216,25 @@ class BaseEvalDatasetProcessor:
                 with open(desc_path, "rb") as f:
                     self.target_descriptions = pickle.load(f)
 
+        self.target_cache = {}
 
-
-    def _add_signature_columns_map_func(self, batch_dict):
+    # def _add_signature_columns_map_func(self, batch_dict):
         
-        raise NotImplementedError(
-            f"{self.__class__.__name__} does not implement `_add_signature_columns_map_func` method. "
-            "Please implement it in the subclass."
-        )
+    #     raise NotImplementedError(
+    #         f"{self.__class__.__name__} does not implement `_add_signature_columns_map_func` method. "
+    #         "Please implement it in the subclass."
+    #     )
 
-    def add_signature_columns(self):
+    # def add_signature_columns(self):
 
-        self.dataset = self.dataset.map(
-            self._add_signature_columns_map_func,
-            batched=True,
-            batch_size=2048,
-            num_proc=4,
-            drop_last_batch=False,
-            load_from_cache_file=False
-        )
+    #     self.dataset = self.dataset.map(
+    #         self._add_signature_columns_map_func,
+    #         batched=True,
+    #         batch_size=2048,
+    #         num_proc=4,
+    #         drop_last_batch=False,
+    #         load_from_cache_file=False
+    #     )
 
 
     def _load_hf_dataset(self):
@@ -240,11 +246,12 @@ class BaseEvalDatasetProcessor:
     def load(self):
 
         self.dataset, self.corpus = self._load_hf_dataset()
+        # debug: take 1 row
+        # self.dataset = self.dataset.select(range(1))
         self.dataset = sample_dataset(self.dataset, **self.dataset_config)
-
-        if self.data_args.apply_chat_template:
-            self.add_signature_columns()
-            self.prepared_targets = self.prepare_targets()
+        # self.add_signature_columns()
+        # if self.data_args.apply_chat_template:
+        #     self.prepared_targets = self.prepare_targets()
         self.dataset = self.dataset.map(lambda x: self.batch_preprocess(x, **self.dataset_config), batched=True,
                             batch_size=1024, num_proc=4,
                             drop_last_batch=False, load_from_cache_file=False)
@@ -252,8 +259,7 @@ class BaseEvalDatasetProcessor:
         #     self.dataset = self.dataset.map(lambda x: self.batch_preprocess_bm(x, **dataset_config), batched=True,
         #                         batch_size=256, num_proc=4,
         #                         drop_last_batch=False, load_from_cache_file=False)
-        self.dataset = self.dataset.select_columns(["query_text", "query_image", "cand_text", "cand_image", "dataset_infos",
-                                                    "query_key_text", "query_key_mm", "cand_key_text", "cand_key_mm"])
+        self.dataset = self.dataset.select_columns(["query_text", "query_image", "cand_text", "cand_image", "dataset_infos"])
         self.candidate_dataset = self.generate_cand_dataset()
         return self.dataset, self.candidate_dataset
 
@@ -263,7 +269,7 @@ class BaseEvalDatasetProcessor:
             "Please implement it in the subclass."
         )
     
-    def batch_preprocess(self, batch_dict):
+    def batch_preprocess(self, batch_dict, **kwargs):
         raise NotImplementedError(
             f"{self.__class__.__name__} does not implement `batch_preprocess` method. "
             "Please implement it in the subclass."
@@ -278,9 +284,8 @@ class BaseEvalDatasetProcessor:
         all_cand_name = set()
         for row in self.dataset:
             assert len(row["cand_text"]) == len(row["cand_image"]) == len(row["dataset_infos"]["cand_names"])
-            for cand_text, cand_image, cand_name, cand_key_text, cand_key_mm in zip(row["cand_text"], row["cand_image"], row["dataset_infos"]["cand_names"], row["cand_key_text"], row["cand_key_mm"]):
-                if self.processor.apply_chat_template:
-                    cand_text = self.prepared_targets[(cand_key_text, cand_key_mm)]
+            for cand_text, cand_image, cand_name in zip(row["cand_text"], row["cand_image"], row["dataset_infos"]["cand_names"]):
+
                 if cand_name not in all_cand_name:
                     cand_rows.append({
                         "cand_text": [cand_text],
@@ -304,10 +309,11 @@ class BaseEvalDatasetProcessor:
         cand_dataset = Dataset.from_list(cand_rows)
         return cand_dataset
 
-    def format_text_for_chat_template(self, text, image_path=None, video_path=None, description=None, add_generation_prompt=False):
+    def format_text_for_chat_template(self, is_query, text, image_path=None, video_path=None, add_generation_prompt=False, key=None):
 
-        if description is not None:
-            description = format_description(description, self.data_args.use_cot)
+        desc = self.query_descriptions if is_query else self.target_descriptions
+
+        description = format_description(desc[key], self.data_args.use_cot) if (desc is not None and key is not None) else ""
 
         formatted_sample = [
             {"role": "system",
@@ -342,8 +348,14 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
     It processes the dataset for MMEB evaluation tasks, including query and target descriptions.
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, *args, 
+                 query_key_text="qry_text", query_key_mm="qry_img_path",
+                 cand_key_text="tgt_text", cand_key_mm="tgt_img_path",
+                 **kwargs):
+        super().__init__(*args, 
+                        query_key_text=query_key_text, query_key_mm=query_key_mm,
+                        cand_key_text=cand_key_text, cand_key_mm=cand_key_mm, 
+                        **kwargs)
         self.data_parser_name = "mmeb_eval"
         self.subset_name = self.dataset_config.get("dataset_name")
         self.dataset_split = self.dataset_config.get("dataset_split", "test")
@@ -351,12 +363,12 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
         # for MMEB v2, the query text doesn't include instructions, so we need to take the instruction part out from the description
         if self.query_descriptions is not None:
             self.query_descriptions = {
-                (extract_query_from_mmeb(qry_text, self.subset_name), qry_image_path): desc \
+                (extract_query(qry_text, self.subset_name), qry_image_path): desc \
                 for (qry_text, qry_image_path), desc in self.query_descriptions.items()
             }
         if self.target_descriptions is not None:
             self.target_descriptions = {
-                (extract_target_from_mmeb(tgt_text, self.subset_name), tgt_image_path): desc \
+                (extract_target(tgt_text, self.subset_name), tgt_image_path): desc \
                 for (tgt_text, tgt_image_path), desc in self.target_descriptions.items()
             }
 
@@ -364,27 +376,27 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
             Precompute targets to avoid repetitive processing 1000x for each sample.
         """
 
-    def prepare_targets(self):
-        unique_pairs = set()
-        for row in self.dataset:
-            assert len(row["cand_key_text"]) == len(row["cand_key_mm"])
-            for cand_text, cand_image in zip(row["cand_key_text"], row["cand_key_mm"]):
-                unique_pairs.add((cand_text, cand_image))
+    # def prepare_targets(self):
+    #     unique_pairs = set()
+    #     for row in self.dataset:
+    #         assert len(row["cand_key_text"]) == len(row["cand_key_mm"])
+    #         for cand_text, cand_image in zip(row["cand_key_text"], row["cand_key_mm"]):
+    #             unique_pairs.add((cand_text, cand_image))
 
-        preprocessed_pairs = {}
+    #     preprocessed_pairs = {}
 
-        for cand_text, cand_image in unique_pairs:
+    #     for cand_text, cand_image in unique_pairs:
 
-            description = None
-            if self.target_descriptions is not None:
-                description = format_description(self.target_descriptions[(cand_text, cand_image)], self.data_args.use_cot)
+    #         description = None
+    #         if self.target_descriptions is not None:
+    #             description = format_description(self.target_descriptions[(cand_text, cand_image)], self.data_args.use_cot)
 
-            cand_text_processed = get_target(self.subset_name, cand_text, self.data_args.use_cot)
-            cand_text_processed = self.format_text_for_chat_template(cand_text_processed, cand_image, description=description, add_generation_prompt=self.model_args.do_sft_target)
+    #         cand_text_processed = get_target(self.subset_name, cand_text, self.data_args.use_cot)
+    #         cand_text_processed = self.format_text_for_chat_template(cand_text_processed, cand_image, description=description, add_generation_prompt=self.model_args.do_sft_target)
             
-            preprocessed_pairs[(cand_text, cand_image)] = cand_text_processed
+    #         preprocessed_pairs[(cand_text, cand_image)] = cand_text_processed
         
-        return preprocessed_pairs
+    #     return preprocessed_pairs
 
     def _load_hf_dataset(self):
                 # dataset and corpus, if available
@@ -399,19 +411,19 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
         self.repo_subset_split = repo_subset_split
         return load_hf_dataset(self.repo_subset_split, subset_name=load_subset_name), None
 
-    def _add_signature_columns_map_func(self, batch_dict):
-        signature_columns = {
+    # def _add_signature_columns_map_func(self, batch_dict):
+    #     signature_columns = {
 
-            # @xuanming we assume modality in the order of text, image, video
-            # current assume two modalities max for query and target
-            "query_key_text": batch_dict['qry_text'],
-            "query_key_mm": batch_dict['qry_img_path'],
-            "cand_key_text": batch_dict['tgt_text'],
-            "cand_key_mm": batch_dict['tgt_img_path']}
-        return batch_dict | signature_columns
+    #         # @xuanming we assume modality in the order of text, image, video
+    #         # current assume two modalities max for query and target
+    #         "query_key_text": batch_dict['qry_text'],
+    #         "query_key_mm": batch_dict['qry_img_path'],
+    #         "cand_key_text": batch_dict['tgt_text'],
+    #         "cand_key_mm": batch_dict['tgt_img_path']}
+    #     return batch_dict | signature_columns
 
     @add_metainfo_hook
-    def batch_preprocess(self, batch_dict):
+    def batch_preprocess(self, batch_dict, **kwargs):
         image_resolution, model_backbone = self.dataset_config['image_resolution'], self.dataset_config['model_backbone']
         image_root = self.dataset_config['image_root']
 
@@ -433,35 +445,31 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
                 if model_backbone != PHI3V:
                     qry_text = qry_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[model_backbone])
 
-                qry_inst = "\n" + qry_inst.replace("<|image_1|>", "").strip()
-                qry_text = process_input_text(qry_inst, model_backbone, text=qry_text, add_image_token=True)
-                # to stay consistent with v1 eval
-                qry_text = qry_text.replace(" \n", "\n") + "\n"
-
-
-                if tgt_texts[0].strip():  # RefCOCO-Matching has valid text inputs
-                    tgt_inst = tgt_inst.replace("<|image_1|>", "")
-                    tgt_inst_captions = []
-                    
-                    tgt_inst_caption = process_input_text(tgt_inst + ' ' + tgt_cap, model_backbone, text='', add_image_token=True)
-                    tgt_inst_caption = tgt_inst_caption.replace(" \n", "\n") + '\n'
-                    tgt_inst_captions.append(tgt_inst_caption)
-                    cand_texts.append(tgt_inst_captions)
-                else:
-                    tgt_inst = tgt_inst.replace("<|image_1|>", "")
-                    tgt_inst_caption = process_input_text(tgt_inst, model_backbone, text='', add_image_token=True)
-                    tgt_inst_caption = tgt_inst_caption.replace(" \n", "\n")  # to stay consistent with v1 eval
-
-                    cand_texts.append([tgt_inst_caption] * len(tgt_image_paths))
-                tgt_inst_captions = []
-                for tgt_cap in tgt_texts:
-                        tgt_inst_captions.append(tgt_cap.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[model_backbone]))
-
+                if self.model_backbone != PHI3V:
+                    qry_text = qry_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[self.model_backbone])
+                    tgts = []
+                    for tgt_text, tgt_image_path in zip(tgt_texts, tgt_image_paths):
+                        if (tgt_text, tgt_image_path) not in self.target_cache:
+                            self.target_cache[(tgt_text, tgt_image_path)] = tgt_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[self.model_backbone])
+                        tgts.append(self.target_cache[(tgt_text, tgt_image_path)])
+                    cand_texts.append(tgts)
             else:
                 qry_text = get_query(self.subset_name, qry_text, self.data_args.use_cot)
                 qry_text = self.format_text_for_chat_template(qry_text, qry_image_path, description=qry_description, add_generation_prompt=self.model_args.do_sft_query)
-
-                cand_texts.append([self.prepared_targets[(tgt_cap, tgt_img_path)] for tgt_cap, tgt_img_path in zip(tgt_texts, tgt_image_paths)])
+                cand_text = []
+                for tgt_cap, tgt_img_path in zip(tgt_texts, tgt_image_paths):
+                    if (tgt_cap, tgt_img_path) not in self.target_cache:
+                        description = None
+                        if self.target_descriptions is not None:
+                            description = format_description(self.target_descriptions[(tgt_cap, tgt_img_path)], self.data_args.use_cot)
+                        self.target_cache[(tgt_cap, tgt_img_path)] = self.format_text_for_chat_template(False, 
+                                                                                                        text=get_target(self.subset_name, tgt_cap, self.data_args.use_cot), 
+                                                                                                        image_path=tgt_img_path, 
+                                                                                                        description=description, 
+                                                                                                        add_generation_prompt=self.model_args.do_sft_target)
+                        
+                    cand_text.append(self.target_cache[(tgt_cap, tgt_img_path)])
+                cand_texts.append(cand_text)
 
             query_texts.append([qry_text])
 
@@ -489,45 +497,110 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
 class MMEBV2EvalDatasetProcessor(BaseEvalDatasetProcessor):
 
 
-    def __init__(self, *args, query_instruction=None, target_instruction=None, target_modality="video", **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.query_instruction = query_instruction
-        self.target_instruction = target_instruction
-        self.target_modality = target_modality
 
-    def prepare_targets(self):
-        """
-            Precompute targets to avoid repetitive processing 1000x for each sample.
-        """
+    # def prepare_targets(self):
+    #     """
+    #         Precompute targets to avoid repetitive processing 1000x for each sample.
+    #     """
 
-        unique_pairs = set()
-        for row in self.dataset:
-            if not isinstance(row["cand_key_text"], list):
-                unique_pairs.add((row["cand_key_text"], row["cand_key_mm"]))
-            else:
-                assert len(row["cand_key_text"]) == len(row["cand_key_mm"])
-                for cand_text, cand_mm in zip(row["cand_key_text"], row["cand_key_mm"]):
-                    unique_pairs.add((cand_text, cand_mm))
+    #     unique_pairs = set()
+    #     for row in self.dataset:
+    #         if not isinstance(row[self.cand_key_text], list):
+    #             unique_pairs.add((row[self.cand_key_text], row[self.cand_key_mm]))
+    #         else:
+    #             assert len(row[self.cand_key_text]) == len(row[self.cand_key_mm])
+    #             for cand_text, cand_mm in zip(row[self.cand_key_text], row[self.cand_key_mm]):
+    #                 unique_pairs.add((cand_text, cand_mm))
 
-        preprocessed_pairs = {}
+    #     preprocessed_pairs = {}
 
-        for cand_text, cand_mm in unique_pairs:
+    #     for cand_text, cand_mm in unique_pairs:
 
-            description = self.target_descriptions[(cand_text, cand_mm)] if self.target_descriptions is not None else None
+    #         description = self.target_descriptions[(cand_text, cand_mm)] if self.target_descriptions is not None else None
 
-            cand_text_processed = process_input_text(self.target_instruction, self.model_backbone, text=cand_text)
-            input_kwargs = {
-                "text": cand_text_processed,
-                "description": description,
-                "add_generation_prompt": self.model_args.do_sft_target
-            }
+    #         cand_text_processed = process_input_text(self.target_instruction, self.model_backbone, text=cand_text)
+    #         input_kwargs = {
+    #             "text": cand_text_processed,
+    #             "description": description,
+    #             "add_generation_prompt": self.model_args.do_sft_target
+    #         }
 
-            if self.target_modality == "video":
-                input_kwargs["video_path"] = cand_mm
-            elif self.target_modality == "text":
-                input_kwargs["image_path"] = cand_mm
+    #         pos_image_input = pos_video_input = None
+    #         if cand_mm:
+    #             if len(cand_mm['paths']) > 1:
+    #                 pos_video_input = cand_mm['paths'][0] or cand_mm['bytes'][0]
+    #             else:
+    #                 pos_image_input = cand_mm['paths'][0] or cand_mm['bytes'][0]
 
-            preprocessed_pairs[(cand_text, cand_mm)] = self.format_text_for_chat_template(**input_kwargs)
+    #         input_kwargs["image_path"] = pos_image_input
+    #         input_kwargs["video_path"] = pos_video_input
+    #         preprocessed_pairs[(cand_text, cand_mm)] = self.format_text_for_chat_template(**input_kwargs)
         
-        return preprocessed_pairs
+    #     return preprocessed_pairs
 
+
+    @add_metainfo_hook
+    def batch_preprocess(self, batch_dict, *args, **kwargs):
+
+        query_texts, query_images, cand_texts, cand_images, dataset_infos = [], [], [], [], []
+        batch_size = len(next(iter(batch_dict.values())))
+
+        for data_idx in range(batch_size):
+            one_sample = self._process_one_sample(data_idx, batch_dict, *args, **kwargs)
+            query_text, query_image, cand_text, cand_image, dataset_infos = \
+                one_sample['query_text'], one_sample['query_image'], \
+                one_sample['cand_text'], one_sample['cand_image'], \
+                one_sample['dataset_infos']
+
+            if self.data_args.apply_chat_template:
+
+                query_image_input = query_video_input = None
+                if query_image:
+                    if len(query_image['paths']) > 1:
+                        query_video_input = query_image['paths'][0] or query_image['bytes'][0]
+                    else:
+                        query_image_input = query_image['paths'][0] or query_image['bytes'][0]
+                
+
+                
+                query_key_text = batch_dict[self.query_key_text][data_idx] if self.query_key_text else ""
+                query_key_mm = batch_dict[self.query_key_mm][data_idx] if self.query_key_mm else ""
+
+                query_text = self.format_text_for_chat_template(
+                    is_query=True, text=query_text, image_path=query_image_input, video_path=query_video_input, 
+                    key=(query_key_text, query_key_mm))
+                
+                cands = []
+                for single_cand_text, single_cand_image in zip(cand_text, cand_image):
+                    cand_image_input = cand_video_input = None
+                    if single_cand_image:
+                        if len(single_cand_image['paths']) > 1:
+                            cand_video_input = single_cand_image['paths'][0] or single_cand_image['bytes'][0]
+                        else:
+                            cand_image_input = single_cand_image['paths'][0] or single_cand_image['bytes'][0]
+                    
+                    single_cand_key_mm = cand_image_input or cand_video_input
+                    if (single_cand_text, single_cand_key_mm) not in self.target_cache:
+                        description = None
+                        if self.target_descriptions is not None:
+                            description = format_description(self.target_descriptions[(single_cand_text, single_cand_key_mm)], self.data_args.use_cot)
+                        self.target_cache[(single_cand_text, single_cand_key_mm)] = self.format_text_for_chat_template(False, 
+                                                                                                        text=single_cand_text, 
+                                                                                                        image_path=cand_image_input, 
+                                                                                                        video_path=cand_video_input, 
+                                                                                                        description=description, 
+                                                                                                        add_generation_prompt=self.model_args.do_sft_target)
+                    cands.append(self.target_cache[(single_cand_text, single_cand_key_mm)])
+                cand_text = cands
+
+            query_texts.append(query_text)
+            query_images.append(query_image)
+            cand_texts.append(cand_text)
+            cand_images.append(cand_image)
+
+
+        return {"query_text": query_texts, "query_image": query_images,
+                "cand_text": cand_texts, "cand_image": cand_images,
+                "dataset_infos": dataset_infos}

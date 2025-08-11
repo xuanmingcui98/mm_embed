@@ -2,7 +2,7 @@ import os
 import sys
 
 from datasets import load_dataset
-from src.data_orig.eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, RESOLUTION_MAPPING
+from ..eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, RESOLUTION_MAPPING
 from src.model.processor import process_input_text
 
 
@@ -36,7 +36,7 @@ def data_prepare(batch_dict, *args, **kwargs):
 
 
 DATASET_PARSER_NAME = "image_qa"
-DATASET_HF_PATH = "/home/xuanmingcui/datasets/MMEB-eval"
+DATASET_HF_PATH = "ziyjiang/MMEB_Test_Instruct"
 @AutoEvalPairDataset.register(DATASET_PARSER_NAME)
 def load_image_qa_dataset(model_args, data_args, *args, **kwargs):
     dataset_name = kwargs["dataset_name"]

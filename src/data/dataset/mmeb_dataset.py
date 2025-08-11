@@ -6,7 +6,7 @@ import os, pickle
 from datasets.features.image import image_to_bytes
 
 from torch.jit import isinstance
-from src.data.dataset.base_pair_dataset import AutoPairDataset, add_metainfo_hook, MULTIMODAL_FEATURES, \
+from ..dataset.base_pair_dataset import AutoPairDataset, add_metainfo_hook, MULTIMODAL_FEATURES, \
     RESOLUTION_MAPPING
 from src.model.processor import PHI3V, VLM_IMAGE_TOKENS
 from src.utils import print_master, print_rank
@@ -113,8 +113,20 @@ class MMEBDatasetProcessor(BaseDatasetProcessor):
                  processor, 
                  **dataset_config):
         
-        super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, processor, **dataset_config)
+        super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, processor, 
+                         query_key_text="qry",
+                         query_key_mm="qry_image_path",
+                         cand_key_text="pos_text",
+                         cand_key_mm="pos_image_path",
+                         **dataset_config)
 
+    # def _add_signature_columns_map_func(self, batch_dict):
+    #     signature_columns = {
+    #         "query_key_text": batch_dict['qry'],
+    #         "query_key_mm": batch_dict['qry_image_path'],
+    #         "target_key_text": batch_dict['pos_text'],
+    #         "target_key_mm": batch_dict['pos_image_path']}
+    #     return batch_dict | signature_columns
 
 def load_mmeb_dataset(model_args, data_args, training_args, processor, *args, **kwargs):
     dataset_name = kwargs.get("dataset_name", DATASET_PARSER_NAME)

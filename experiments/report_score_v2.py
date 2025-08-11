@@ -11,9 +11,9 @@ from datetime import datetime
 
 EXPERIMENTS = [
     {
-        "path": "vlm2vec_exps/VLM2Vec-Qwen2VL-V2.0-2B/",
+        "path": "runs/qwen2-2b_v2_full_bm_lr2e-4_bs128_1epochs_8x8_472937/eval",
         "metadata": {
-            "model_name": "VLM2Vec-Qwen2VL-V2.0-2B",
+            "model_name": "VLM2Vec-Qwen2VL-V2.0-2B-reproduced_2e-4lr_8x8_1epoch",
             "model_size": "2B parameters",
             "embedding_dimension": None, # Please fill in
             "max_length_tokens": None,   # Please fill in
@@ -22,41 +22,24 @@ EXPERIMENTS = [
             "url": ""                    # e.g., Paper, GitHub, or Hugging Face link
         }
     },
-    {
-        "path": "vlm2vec_exps/VLM2Vec-Qwen2VL-V2.1-2B/",
-        "metadata": {
-            "model_name": "VLM2Vec-Qwen2VL-V2.1-2B",
-            "model_size": "2B parameters",
-            "embedding_dimension": None, # Please fill in
-            "max_length_tokens": None,   # Please fill in
-            "model_release_date": "2025-05-15", # Please adjust this date
-            "score_source": "",           # e.g., "Self-Reported" or "TIGER-Lab"
-            "url": ""                    # e.g., Paper, GitHub, or Hugging Face link
-        }
-    },
+    # {
+    #     "path": "vlm2vec_exps/VLM2Vec-Qwen2VL-V2.1-2B/",
+    #     "metadata": {
+    #         "model_name": "VLM2Vec-Qwen2VL-V2.1-2B",
+    #         "model_size": "2B parameters",
+    #         "embedding_dimension": None, # Please fill in
+    #         "max_length_tokens": None,   # Please fill in
+    #         "model_release_date": "2025-05-15", # Please adjust this date
+    #         "score_source": "",           # e.g., "Self-Reported" or "TIGER-Lab"
+    #         "url": ""                    # e.g., Paper, GitHub, or Hugging Face link
+    #     }
+    # },
 ]
 
 
 # ==============================================================================
 # TODO: Your models' metadata goes here. Please fill in the required fields.
 # ==============================================================================
-
-EXPERIMENTS = [
-    {
-        "path": ...,
-        "metadata": {
-            "model_name": ...,
-            "model_backbone": ...,
-            "model_size": ...,
-            "embedding_dimension": ...,
-            "max_length_tokens": ...,
-            "model_release_date": ...,
-            "data_source": "Self-Reported",
-            "url": ...
-        }
-    },
-    ...
-]
 
 
 # ==============================================================================
@@ -104,7 +87,8 @@ for experiment in EXPERIMENTS:
 
     for modality in modalities:
         current_experiment_scores[modality] = {}
-        modality_specific_result_dir = os.path.join(base_path, modality)
+        # modality_specific_result_dir = os.path.join(base_path, modality)
+        modality_specific_result_dir = os.path.join(base_path)
 
         for dataset_name in modality2dataset.get(modality, []):
             current_experiment_scores[modality][dataset_name] = "FILE_N/A" # Initialize
@@ -176,6 +160,7 @@ for experiment in EXPERIMENTS:
 
     # --- Print average scores and missing datasets per modality ---
     print(f"\n  --- Summary for Experiment: {experiment_name_for_log} ---")
+    overall_score = []
     for modality in modalities:
         if modality not in current_experiment_scores:
             print(f"    Modality '{modality.upper()}' not processed.")
@@ -192,6 +177,7 @@ for experiment in EXPERIMENTS:
                 metric_value = score_info.get(main_metric_key)
                 if isinstance(metric_value, (int, float)):
                     collected_metric_values.append(metric_value)
+                    overall_score.append(metric_value)
                 else:
                     datasets_file_found_metric_missing.append(f"{dataset_name} (metric '{main_metric_key}' missing/invalid)")
             else:
@@ -209,6 +195,6 @@ for experiment in EXPERIMENTS:
         if datasets_file_found_metric_missing:
             print(f"      Score files found but main metric ('{main_metric_key}') missing/invalid:")
             for ds_status in datasets_file_found_metric_missing: print(f"        - {ds_status}")
-
+    print(f"    Overall Average Score across all modalities: {sum(overall_score) / len(overall_score) if overall_score else 'N/A'}")
 
 print("\nProcessing complete.")

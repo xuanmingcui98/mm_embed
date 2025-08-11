@@ -19,7 +19,7 @@ def process_query(query, prompt, video_token=''):
 
 
 TASK_INST_QRY = "Given a video and a question, select the most accurate answer from the provided candidates. Return only the exact text of your chosen answer. Question: "
-TASK_INST_TGT = "Represent the following text answer to a question.\nAnswer: "
+TASK_INST_TGT = "Represent the following text:\n"
 OPTIONS = ['A', 'B', 'C', 'D']
 
 subset_names = ['Perception', 'Comprehension', 'Adaptation']

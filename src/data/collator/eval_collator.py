@@ -1,13 +1,13 @@
 import logging
 from dataclasses import dataclass
 from transformers import ProcessorMixin, AutoProcessor, AutoTokenizer
-from src.arguments import DataArguments, ModelArguments
+from ...arguments import DataArguments, ModelArguments
 import torch
 from qwen_vl_utils import smart_resize
 from PIL import Image
-from src.model.processor import LLAVA_NEXT, QWEN2_VL, QWEN2_5_VL, PHI3V, QWEN2_VL_TOKENSELECTION, QWEN2_5_VL_TOKENSELECTION, process_vlm_inputs_fns
+from ...model.processor import LLAVA_NEXT, QWEN2_VL, QWEN2_5_VL, PHI3V, QWEN2_VL_TOKENSELECTION, QWEN2_5_VL_TOKENSELECTION, process_vlm_inputs_fns
 
-from src.utils import print_rank, print_master
+from ...utils import print_rank, print_master
 import io
 
 logger = logging.getLogger(__name__)

@@ -3,14 +3,14 @@ from functools import wraps
 from datasets import Features, Value, Sequence
 import pickle, os
 from datasets import load_dataset, concatenate_datasets
-from src.model.processor import PHI3V, VLM_IMAGE_TOKENS
-from src.utils import print_master, print_rank
+from ...model.processor import PHI3V, VLM_IMAGE_TOKENS, VLM_VIDEO_TOKENS
+from ...utils import print_master, print_rank
 from ..prompts import (get_query, get_target, 
                        format_description, format_text_for_chat_template, 
                        TASK2ID)
-from src.data.utils.dataset_utils import sample_dataset
-from src.data.utils.vision_utils import save_frames, load_frames, sample_frames
-from src.model.processor import process_input_text
+from ..utils.dataset_utils import sample_dataset
+from ..utils.vision_utils import save_frames, load_frames, sample_frames
+from ...model.processor import process_input_text
 import torch
 
 DATASET_INSTRUCTION = {
@@ -124,6 +124,10 @@ class BaseDatasetProcessor:
                  data_args, 
                  training_args, 
                  processor, 
+                 query_key_text=None,
+                 query_key_mm=None,
+                 cand_key_text=None,
+                 cand_key_mm=None,
                  **dataset_config):
         self.model_args = model_args
         self.data_args = data_args
@@ -138,6 +142,11 @@ class BaseDatasetProcessor:
         self.image_dir = self.dataset_config.get('image_dir', None)
         self.model_backbone = self.model_args.model_backbone
         self.image_resolution = self.dataset_config.get('image_resolution', None)
+
+        self.query_key_text = query_key_text
+        self.query_key_mm = query_key_mm
+        self.cand_key_text = cand_key_text
+        self.cand_key_mm = cand_key_mm
 
         self.query_descriptions = self.target_descriptions = None
         if data_args.query_description_dir is not None:
@@ -164,13 +173,18 @@ class BaseDatasetProcessor:
         self.dataset_config['subset_name'] = self.subset_name
 
         self.dataset = self._load_hf_dataset()
+        # self.add_signature_columns()
+
+        # TODO debug take only 1 sample
+        # self.dataset = self.dataset.select(range(10)) 
 
         self.column_names = self.dataset.column_names
         self.dataset = sample_dataset(self.dataset, **dataset_config)
         num_rows = self.dataset.num_rows
         world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
-         # self.training_args.dataloader_num_workers if self.training_args.dataloader_num_workers > 0 else 1
-        self.dataset = self.dataset.to_iterable_dataset(num_shards=world_size)
+        n_workers_per_node = self.training_args.dataloader_num_workers if self.training_args.dataloader_num_workers > 0 else 1
+        self.dataset = self.dataset.to_iterable_dataset(num_shards=min(len(self.dataset), world_size * n_workers_per_node))
+        # self.dataset = self.dataset.to_iterable_dataset(num_shards=n_workers_per_node)
         setattr(self.dataset, 'num_rows', num_rows)
 
     def load(self):
@@ -188,6 +202,7 @@ class BaseDatasetProcessor:
                             batched=True, 
                             batch_size=64,
                             remove_columns=columns_to_remove,
+                            drop_last_batch=True # temp
                             )
 
         self.dataset = self.dataset.cast(MULTIMODAL_FEATURES)
@@ -208,8 +223,8 @@ class BaseDatasetProcessor:
 
             num_rows *= 2
             
-        # dataset = dataset.add_column("global_dataset_name", [self.dataset_config.get("global_dataset_name", self.data_parser_name)] * num_rows)
-        # dataset = dataset.add_column("task_id", [TASK2ID[self.subset_name]] * num_rows)
+        # self.dataset = self.dataset.add_column("global_dataset_name", [self.dataset_config.get("global_dataset_name", self.data_parser_name)] * num_rows)
+        # self.dataset = self.dataset.add_column("task_id", [TASK2ID[self.subset_name]] * num_rows)
 
         print_master(f"Loaded {self.data_parser_name}/{self.subset_name} dataset with {num_rows} samples")
         setattr(self.dataset, 'num_rows', num_rows)
@@ -227,11 +242,79 @@ class BaseDatasetProcessor:
         return dataset
 
 
+    def _process_one_sample(self, idx, batch_dict, *args, **kwargs):
+        """
+            Process one sample in the batch.
+            May be implemented by subclasses.
+        """
+        raise NotImplementedError("This method should be implemented by subclasses.")
+
+    # def _add_signature_columns_map_func(self, batch_dict):
+
+    #     """
+    #         Expect to return 
+    #             {"query_text": query, "query_image": query_image,
+    #              "pos_text": pos_text, "pos_image": pos_image,
+    #              "neg_text": neg_text, "neg_image": neg_image}
+        
+    #     """
+        
+    #     raise NotImplementedError(
+    #         f"{self.__class__.__name__} does not implement `_add_signature_columns_map_func` method. "
+    #         "Please implement it in the subclass."
+    #     )
+
+    # def add_signature_columns(self):
+
+    #     self.dataset = self.dataset.map(
+    #         self._add_signature_columns_map_func,
+    #         batched=True,
+    #         batch_size=2048,
+    #         # num_proc=12,
+    #         drop_last_batch=False,
+    #         load_from_cache_file=False
+    #     )
+    
+    def format_text_for_chat_template(self, is_query, text, image_path=None, video_path=None, key=None, add_generation_prompt=False):
+
+        # remove image/video pad token
+
+        text = text.replace(VLM_IMAGE_TOKENS[self.model_backbone], "")
+        text = text.replace(VLM_VIDEO_TOKENS[self.model_backbone], "").strip()
+
+        desc = self.query_descriptions if is_query else self.target_descriptions
+
+        description = format_description(desc[key], self.data_args.use_cot) if (desc is not None and key is not None) else ""
+
+        formatted_sample = [
+            {"role": "system",
+            "content": [{"type": "text", "text": "You are a helpful assistant."}],}
+        ]
+        user_content = [] 
+        if image_path:
+            user_content.append({"type": "image", "image": image_path})
+        if video_path:
+            user_content.append({"type": "video", "video": video_path})
+        user_content.append({"type": "text", "text": text})
+        formatted_sample.append({"role": "user", "content": user_content})
+
+        if not add_generation_prompt:
+            formatted_sample.append({
+                "role": "assistant",
+                "content": [{"type": "text", "text": description}],
+            })
+        
+        formatted_sample = self.processor.apply_chat_template(formatted_sample, add_generation_prompt=add_generation_prompt, tokenize=False)
+        if not add_generation_prompt:
+            formatted_sample = formatted_sample.strip()
+
+        if self.meta_queries:
+            formatted_sample += self.meta_queries
+        return formatted_sample 
+
+
     @add_metainfo_hook
     def batch_preprocess(self, batch_dict, data_args, model_args, processor, *args, **kwargs):
-
-
-        is_train = kwargs.get("dataset_split", "original") == "original"
 
         batch_size = len(batch_dict['qry'])
         query_texts, query_images, pos_texts, pos_images, neg_texts, neg_images = [], [], [], [], [], []
@@ -243,18 +326,11 @@ class BaseDatasetProcessor:
                 print("empty inputs")
                 continue
 
-            qry_description = pos_description = None
-            if self.query_descriptions is not None:
-                qry_description = format_description(self.query_descriptions[(qry_text, qry_image_path)], data_args.use_cot)
-
-            if self.target_descriptions is not None:
-                pos_description = format_description(self.target_descriptions[(pos_text, pos_image_path)], data_args.use_cot)
-
             if data_args.apply_chat_template:
-                qry_text = get_query(self.subset_name, qry_text, data_args.use_cot)
-                pos_text = get_target(self.subset_name, pos_text, data_args.use_cot)
-                qry_text = format_text_for_chat_template(processor, qry_text, qry_image_path, description=qry_description, add_generation_prompt=not is_train and model_args.do_sft_query) + self.meta_queries
-                pos_text = format_text_for_chat_template(processor, pos_text, pos_image_path, description=pos_description, add_generation_prompt=not is_train and model_args.do_sft_target) + self.meta_queries
+                qry_text = get_query(self.subset_name, qry_text, with_description=self.query_descriptions is not None, cot_prompt=data_args.use_cot)
+                pos_text = get_target(self.subset_name, pos_text, with_description=self.target_descriptions is not None, cot_prompt=data_args.use_cot)
+                qry_text = self.format_text_for_chat_template(is_query=True, text=qry_text, image_path=qry_image_path, add_generation_prompt=False, key=(qry_text, qry_image_path))
+                pos_text = self.format_text_for_chat_template(is_query=False, text=pos_text, image_path=pos_image_path, add_generation_prompt=False, key=(pos_text, pos_image_path))
             else:
                 if self.model_backbone != PHI3V:
                     qry_text = qry_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[self.model_backbone])
@@ -291,37 +367,53 @@ class VideoDatasetProcessor(BaseDatasetProcessor):
 
         return load_dataset(self.dataset_name, split="train")
 
+
     @add_metainfo_hook
     def batch_preprocess(self, batch_dict, *args, **kwargs):
-        num_frames = kwargs['num_frames']
-        video_dir, frame_base_dir = kwargs['video_dir'], kwargs['frame_dir']
-        max_frames_saved = kwargs['max_frames_saved']
 
         query_texts, query_images, pos_texts, pos_images, neg_texts, neg_images = [], [], [], [], [], []
-        for query_video_id, pos_text, video_path, neg_text in \
-                zip(batch_dict['video_id'], batch_dict['pos_text'], batch_dict['video_path'], batch_dict['neg_text']):
-            query_video_id = str(query_video_id)
-            video_path = os.path.join(video_dir, video_path)
-            video_path = fr"{video_path}" # interpret video path as r-string to avoid some path issues
-            frame_dir = os.path.join(frame_base_dir, query_video_id)
-            save_frames(video_path=video_path, frame_dir=frame_dir, max_frames_saved=max_frames_saved)
-            video_frame_paths = load_frames(frame_dir)
-            video_frame_paths = sample_frames(video_frame_paths, num_segments=num_frames)
+        batch_size = len(next(iter(batch_dict.values())))
+
+        for data_idx in range(batch_size):
+            one_sample = self._process_one_sample(data_idx, batch_dict, *args, **kwargs)
+            query_text, query_image, pos_text, pos_image, neg_text, neg_image  = \
+                one_sample['query_text'], one_sample['query_image'], \
+                one_sample['pos_text'], one_sample['pos_image'], \
+                one_sample['neg_text'], one_sample['neg_image']
 
             if self.data_args.apply_chat_template:
-                query_text = format_text_for_chat_template(
-                    self.processor, DATASET_INSTRUCTION[self.dataset_name], video_frame_paths, add_generation_prompt=False)
-                pos_text = format_text_for_chat_template(
-                    self.processor, pos_text, video_frame_paths, add_generation_prompt=False)
-            else:
-                query_text = process_input_text(DATASET_INSTRUCTION[self.dataset_name], self.model_backbone, add_video_token=True)
+
+                query_image_input = query_video_input = None
+                if query_image:
+                    if len(query_image['paths']) > 1:
+                        query_video_input = query_image['paths'][0] or query_image['bytes'][0]
+                    else:
+                        query_image_input = query_image['paths'][0] or query_image['bytes'][0]
+                
+                pos_image_input = pos_video_input = None
+                if pos_image:
+                    if len(pos_image['paths']) > 1:
+                        pos_video_input = pos_image['paths'][0] or pos_image['bytes'][0]
+                    else:
+                        pos_image_input = pos_image['paths'][0] or pos_image['bytes'][0]
+                
+                query_key_text = batch_dict[self.query_key_text][data_idx] if self.query_key_text else ""
+                query_key_mm = batch_dict[self.query_key_mm][data_idx] if self.query_key_mm else ""
+                cand_key_text = batch_dict[self.cand_key_text][data_idx] if self.cand_key_text else ""
+                cand_key_mm = batch_dict[self.cand_key_mm][data_idx] if self.cand_key_mm else ""
+                query_text = self.format_text_for_chat_template(
+                    is_query=True, text=query_text, image_path=query_image_input, video_path=query_video_input, 
+                    key=(query_key_text, query_key_mm))
+                pos_text = self.format_text_for_chat_template(
+                    is_query=False, text=pos_text, image_path=pos_image_input, video_path=pos_video_input, 
+                    key=(cand_key_text, cand_key_mm))
+
             query_texts.append(query_text)
-            query_images.append({"bytes": [None] * len(video_frame_paths), 'paths': video_frame_paths,
-                                'resolutions': [RESOLUTION_MAPPING.get(self.image_resolution, None)] * len(video_frame_paths)})
+            query_images.append(query_image)
             pos_texts.append(pos_text)
-            pos_images.append(None)
-            neg_texts.append(None)
-            neg_images.append(None)
+            pos_images.append(pos_image)
+            neg_texts.append(neg_text)
+            neg_images.append(neg_image)
 
         return {"query_text": query_texts, "query_image": query_images,
                 "pos_text": pos_texts, "pos_image": pos_images,

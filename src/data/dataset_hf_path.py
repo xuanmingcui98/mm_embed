@@ -1,7 +1,7 @@
 # (repo, subset, split)
 EVAL_DATASET_HF_PATH = {
-    # "IMAGE_TASKS": ("/home/xuanmingcui/datasets/MMEB-eval/", None, "test"),
-    "IMAGE_TASKS": ("ziyjiang/MMEB_Test_Instruct", None, "test"),
+    "IMAGE_TASKS": ("/home/xuanmingcui/datasets/MMEB-eval/", None, "test"),
+    # "IMAGE_TASKS": ("ziyjiang/MMEB_Test_Instruct", None, "test"),
     "MSR-VTT": ("friedrichor/MSR-VTT", "test_1k", "test"),
     "MSVD": ("friedrichor/MSVD", None, "test"),
     "DiDeMo": ("friedrichor/DiDeMo", None, "test"),

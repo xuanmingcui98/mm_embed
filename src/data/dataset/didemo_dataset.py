@@ -2,10 +2,10 @@ import os
 import sys
 
 from datasets import load_dataset
-from src.data.dataset.base_pair_dataset import AutoPairDataset, add_metainfo_hook, MULTIMODAL_FEATURES, \
+from ..dataset.base_pair_dataset import AutoPairDataset, add_metainfo_hook, MULTIMODAL_FEATURES, \
     RESOLUTION_MAPPING, VideoDatasetProcessor
-from src.data.utils.vision_utils import save_frames, load_frames, sample_frames
-from src.data.utils.dataset_utils import sample_dataset
+from ..utils.vision_utils import save_frames, load_frames, sample_frames
+from ..utils.dataset_utils import sample_dataset
 from src.model.processor import process_input_text
 
 

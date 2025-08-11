@@ -1,12 +1,12 @@
 import os
 
 from datasets import load_dataset
-from src.data_orig.dataset_hf_path import EVAL_DATASET_HF_PATH
-from src.data_orig.utils.dataset_utils import load_hf_dataset, sample_dataset
+from ..dataset_hf_path import EVAL_DATASET_HF_PATH
+from ..utils.dataset_utils import load_hf_dataset, sample_dataset
 
-from src.data_orig.eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, RESOLUTION_MAPPING
-from src.data_orig.eval_dataset.base_eval_dataset import ImageVideoInstance
-from src.data_orig.utils.vision_utils import sample_frames, load_frames, VID_EXTENSIONS, save_frames
+from ..eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, RESOLUTION_MAPPING
+from ..eval_dataset.base_eval_dataset import ImageVideoInstance
+from ..utils.vision_utils import sample_frames, load_frames, VID_EXTENSIONS, save_frames
 from src.model.processor import process_input_text
 
 TASK_INST_QRY_TEXT = "Find the clip that corresponds to the given text:"

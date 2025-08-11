@@ -10,7 +10,7 @@ from src.model.processor import PHI3V, VLM_IMAGE_TOKENS
 from ..prompts import (get_query, get_target, 
                        IMAGE_TASKS, VIDEO_TASKS, VISDOC_TASKS,
                        format_description, format_text_for_chat_template, 
-                       extract_query_from_mmeb, extract_target_from_mmeb)
+                       extract_query, extract_target)
 
 
 def process_multi_images(image_basedir, image_paths) -> List[str]:

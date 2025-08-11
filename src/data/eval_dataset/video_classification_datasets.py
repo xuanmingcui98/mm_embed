@@ -10,10 +10,10 @@ from src.model.processor import process_input_text
 from ..prompts import (get_query, get_target, 
                        IMAGE_TASKS, VIDEO_TASKS, VISDOC_TASKS,
                        format_description, format_text_for_chat_template, 
-                       extract_query_from_mmeb, extract_target_from_mmeb)
+                       extract_query, extract_target)
 
 
-TASK_INST_TGT = "Represent the following text answer to a question.\nAnswer: "
+TASK_INST_TGT = "Represent the following text:\n"
 
 DATASET_PARSER_NAME = "video_classification"
 @AutoEvalPairDataset.register(DATASET_PARSER_NAME)
@@ -50,8 +50,8 @@ class VideoClassificationEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         return batch_dict | signature_columns
 
     @add_metainfo_hook
-    def batch_preprocess(self, batch_dict):
-        image_resolution = self.dataset_config['image_resolution']
+    def batch_preprocess(self, batch_dict, **kwargs):
+        image_resolution = self.dataset_config.get('image_resolution')
         num_frames, max_frames_saved = self.dataset_config['num_frames'], self.dataset_config['max_frames_saved']
         video_root, frame_root = self.dataset_config['video_root'], self.dataset_config['frame_root']
         dataset_name = self.dataset_config['dataset_name']

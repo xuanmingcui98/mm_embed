@@ -26,7 +26,7 @@ def format_description(description, prompt_format="gt_only"):
     else:
         return description.strip(". \n")
 
-def extract_query_from_mmeb(qry, subset):
+def extract_query(qry, subset):
     if subset in {"CIRR"}:
         return qry.replace("<|image_1|>\nGiven an image, find a similar everyday image with the described changes: ", "").strip()
     elif subset in {"FashionIQ"}:
@@ -63,7 +63,7 @@ def extract_query_from_mmeb(qry, subset):
         raise ValueError(f"Unknown subset: {subset}")
 
 
-def extract_target_from_mmeb(text, subset):
+def extract_target(text, subset):
     if subset in {"WebQA", "OVEN"}:
         text = text.replace("Represent the given Wikipedia image with related text information: ", "")
     elif subset in {"EDIS"}:
@@ -202,7 +202,7 @@ News text: {query}"""
 
 def get_query(task, query, use_cot=True):
 
-    query = extract_query_from_mmeb(query, task)
+    query = extract_query(query, task)
 
     if task in query_user_prompts_cot:
         query = query_user_prompts_cot[task].format(query=query)
@@ -214,7 +214,7 @@ def get_query(task, query, use_cot=True):
 
 def get_target(task, query, use_cot=True):
 
-    query = extract_target_from_mmeb(query, task)
+    query = extract_target(query, task)
     if task in target_user_prompts_cot:
         query = target_user_prompts_cot[task].format(query=query)
     

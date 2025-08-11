@@ -1,7 +1,7 @@
 from datasets.distributed import split_dataset_by_node
 
-from src.data.dataset.base_pair_dataset import AutoPairDataset
-from src.data.dataset.hf_datasets import interleave_datasets
+from ..dataset.base_pair_dataset import AutoPairDataset
+from ..dataset.hf_datasets import interleave_datasets
 from src.utils import print_master
 import torch
 
@@ -39,6 +39,6 @@ def init_mixed_dataset(dataset_config, model_args, data_args, training_args, pro
     if torch.distributed.is_initialized():
         train_dataset = split_dataset_by_node(train_dataset, rank=torch.distributed.get_rank(), world_size=world_size)
 
-    # setattr(train_dataset, "num_rows", total_num_rows)
+    setattr(train_dataset, "num_rows", total_num_rows)
     return train_dataset
 

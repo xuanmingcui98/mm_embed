@@ -20,8 +20,8 @@ import json
 from functools import wraps
 from transformers import HfArgumentParser, set_seed
 from src.arguments import ModelArguments, DataArguments, TrainingArguments
-from src.data.collator.train_collator import MultimodalDataCollator
-from src.data.loader.mixed_dataset import init_mixed_dataset
+from src.data_orig.collator.train_collator import MultimodalDataCollator
+from src.data_orig.loader.mixed_dataset import init_mixed_dataset
 from src.model.model import MMEBModel
 from src.trainer import GradCacheLateProcessTrainer, MMEBTrainer
 from src.utils import print_rank, print_master, find_latest_checkpoint
@@ -62,6 +62,21 @@ def main():
     set_seed(training_args.seed)
 
     training_args.ddp_timeout = 4800  # Set a timeout for DDP to avoid hanging
+
+    # # DEBUG PRINTS for Distributed Setup
+    # print("Distributed init debug info:")
+    # print(f"RANK: {os.environ.get('RANK')}")
+    # print(f"LOCAL_RANK: {os.environ.get('LOCAL_RANK')}")
+    # print(f"WORLD_SIZE: {os.environ.get('WORLD_SIZE')}")
+    # print(f"MASTER_ADDR: {os.environ.get('MASTER_ADDR')}")
+    # print(f"MASTER_PORT: {os.environ.get('MASTER_PORT')}")
+
+    # if torch.distributed.is_available():
+    #     print(f"torch.distributed.is_initialized: {torch.distributed.is_initialized()}")
+    #     if torch.distributed.is_initialized():
+    #         print(f"torch.distributed.get_rank(): {torch.distributed.get_rank()}")
+    #         print(f"torch.distributed.get_world_size(): {torch.distributed.get_world_size()}")
+
 
     # Check for existing checkpoints
     if training_args.resume_from == 'auto':

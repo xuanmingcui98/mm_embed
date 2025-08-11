@@ -25,10 +25,13 @@ class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, processor, 
                          query_instruction=TASK_INST_QRY, target_instruction=TASK_INST_TGT, target_modality="image", **dataset_config)
 
-    # def add_signature_columns(self):
-    #     self.dataset = self.dataset.add_column("orig_query1", [os.path.splitext(os.path.basename(image_path))[0] for image_path in self.dataset['image_path']])
-    #     self.dataset = self.dataset.add_column("cand_key_text", [""] * len(self.dataset))
-    #     self.dataset = self.dataset.add_column("cand_key_mm", [os.path.splitext(os.path.basename(image_path))[0] for image_path in self.dataset['image_path']])
+    def _add_signature_columns_map_func(self, batch_dict):
+        signature_columns = {
+            "query_key_text": batch_dict['query'],
+            "query_key_mm": [''] * len(batch_dict['query']),
+            "cand_key_text": [''] * len(batch_dict['query']),
+            "cand_key_mm": batch_dict['query_id']}
+        return batch_dict | signature_columns
 
     def _load_hf_dataset(self):
         hf_dataset_name = EVAL_DATASET_HF_PATH[self.dataset_config['dataset_name']][0]

@@ -30,6 +30,7 @@ import multiprocessing
 from multiprocessing import Pool, cpu_count
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s [%(name)s:%(lineno)s] %(message)s')
 logger = logging.getLogger(__name__)
+from src.eval_utils import get_result_summary
 
 
 def pad_dataset_to_divisible(dataset, world_size):
@@ -217,7 +218,7 @@ def main():
         dataset_configs = yaml.safe_load(yaml_file)
 
 
-    data_args.encode_output_path = os.path.join(model_args.checkpoint_path, "eval")
+    data_args.encode_output_path = output_path
     # --- Main Evaluation Loop ---
     for dataset_idx, (dataset_name, task_config) in enumerate(dataset_configs.items()):
         # 0. load dataset
@@ -228,6 +229,18 @@ def main():
         query_embed_path = os.path.join(data_args.encode_output_path, f"{dataset_name}_qry")
         cand_embed_path = os.path.join(data_args.encode_output_path, f"{dataset_name}_tgt")
         dataset_info_path = os.path.join(data_args.encode_output_path, f"{dataset_name}_info.jsonl")
+        result_path = os.path.join(data_args.encode_output_path, f"{dataset_name}_score.json")
+
+        if os.path.exists(result_path):
+            try:
+                with open(result_path, "r") as f:
+                    score_dict = json.load(f)
+                print_master(f"Score of {dataset_name} (loaded from previous run): {result_path}")
+                formatted = {k: f"{v:.4f}" for k, v in score_dict.items()}
+                print_master(formatted)
+                continue
+            except Exception as e:
+                print_master(f"Failed to load score for {dataset_name}, recomputing...")
 
         do_query = not os.path.exists(query_embed_path) or not os.path.exists(dataset_info_path)
         do_cand = not os.path.exists(cand_embed_path)
@@ -373,8 +386,8 @@ def main():
             if os.path.exists(cand_embed_path):
                 os.remove(cand_embed_path)
 
-    from src.eval_utils.get_result_summary import get_summary
-    get_summary(output_path)
+
+    get_result_summary(output_path)
 
 
 if __name__ == "__main__":

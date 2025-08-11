@@ -3,8 +3,8 @@ from datasets import load_dataset
 import os, ast
 
 from torch.jit import isinstance
-from src.data_orig.dataset.gui_dataset import DATASET_PARSER_NAME
-from src.data_orig.eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, \
+from ..dataset.gui_dataset import DATASET_PARSER_NAME
+from ..eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, \
     RESOLUTION_MAPPING
 from src.model.processor import PHI3V, VLM_IMAGE_TOKENS
 

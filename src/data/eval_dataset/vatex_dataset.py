@@ -40,7 +40,7 @@ class VatexEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         return load_hf_dataset(EVAL_DATASET_HF_PATH[self.dataset_config['dataset_name']]), None
 
     @add_metainfo_hook
-    def batch_preprocess(batch_dict, *args, **kwargs):
+    def batch_preprocess(self, batch_dict, *args, **kwargs):
         image_resolution, model_backbone = kwargs['image_resolution'], kwargs['model_backbone']
         num_frames, max_frames_saved = kwargs['num_frames'], kwargs['max_frames_saved']
         video_root, frame_root = kwargs['video_root'], kwargs['frame_root']

@@ -3,9 +3,9 @@ import sys
 
 from datasets import load_dataset
 
-from src.data_orig.eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook
-from src.data_orig.utils.dataset_utils import sample_dataset
-from src.data_orig.utils.vision_utils import temporal_random_crop, process_video_frames, load_frames
+from ..eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook
+from ..utils.dataset_utils import sample_dataset
+from ..utils.vision_utils import temporal_random_crop, process_video_frames, load_frames
 from src.model.processor import VLM_VIDEO_TOKENS
 import torchvision
 import cv2

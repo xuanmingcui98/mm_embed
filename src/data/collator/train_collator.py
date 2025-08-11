@@ -5,15 +5,15 @@ from torch.jit import isinstance
 import logging
 from dataclasses import dataclass
 from transformers import ProcessorMixin, AutoProcessor, AutoTokenizer
-from src.arguments import DataArguments, ModelArguments, TrainingArguments
+from ...arguments import DataArguments, ModelArguments, TrainingArguments
 import torch
 from qwen_vl_utils import smart_resize
 
-from src.model.processor import LLAVA_NEXT, QWEN2_VL, QWEN2_5_VL, \
+from ...model.processor import LLAVA_NEXT, QWEN2_VL, QWEN2_5_VL, \
     QWEN2_VL_TOKENSELECTION, QWEN2_5_VL_TOKENSELECTION, PHI3V, process_vlm_inputs_fns
 from PIL import Image
 import io
-from src.utils import print_rank, print_master
+from ...utils import print_rank, print_master
 
 
 logger = logging.getLogger(__name__)

@@ -9,7 +9,7 @@ from src.model.processor import process_input_text
 from ..prompts import (get_query, get_target, 
                        IMAGE_TASKS, VIDEO_TASKS, VISDOC_TASKS,
                        format_description, format_text_for_chat_template, 
-                       extract_query_from_mmeb, extract_target_from_mmeb)
+                       extract_query, extract_target)
 
 TASK_INST_QRY = "Find the clip that corresponds to the described scene in the given video:"
 TASK_INST_TGT = "Understand the content of the provided video."

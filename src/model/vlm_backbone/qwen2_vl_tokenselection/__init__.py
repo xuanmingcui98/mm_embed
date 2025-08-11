@@ -43,32 +43,32 @@ else:
     _import_structure["image_processing_qwen2_vl"] = ["Qwen2VLImageProcessor"]
 
 
-if TYPE_CHECKING:
-    from .configuration_qwen2_vl import Qwen2VLConfig
-    from .processing_qwen2_vl import Qwen2VLProcessor
+# if TYPE_CHECKING:
+from .configuration_qwen2_vl import Qwen2VLConfig
+from .processing_qwen2_vl import Qwen2VLProcessor
 
-    try:
-        if not is_torch_available():
-            raise OptionalDependencyNotAvailable()
-    except OptionalDependencyNotAvailable:
-        pass
-    else:
-        from .modeling_qwen2_vl import (
-            Qwen2VLForConditionalGeneration,
-            Qwen2VLModel,
-            Qwen2VLPreTrainedModel,
-        )
-
-    try:
-        if not is_vision_available():
-            raise OptionalDependencyNotAvailable()
-    except OptionalDependencyNotAvailable:
-        pass
-    else:
-        from .image_processing_qwen2_vl import Qwen2VLImageProcessor
-
-
+try:
+    if not is_torch_available():
+        raise OptionalDependencyNotAvailable()
+except OptionalDependencyNotAvailable:
+    pass
 else:
-    import sys
+    from .modeling_qwen2_vl import (
+        Qwen2VLForConditionalGeneration,
+        Qwen2VLModel,
+        Qwen2VLPreTrainedModel,
+    )
 
-    sys.modules[__name__] = _LazyModule(__name__, globals()["__file__"], _import_structure)
+try:
+    if not is_vision_available():
+        raise OptionalDependencyNotAvailable()
+except OptionalDependencyNotAvailable:
+    pass
+else:
+    from .image_processing_qwen2_vl import Qwen2VLImageProcessor
+
+
+# else:
+#     import sys
+
+#     sys.modules[__name__] = _LazyModule(__name__, globals()["__file__"], _import_structure)

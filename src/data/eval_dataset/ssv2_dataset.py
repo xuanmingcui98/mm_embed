@@ -10,9 +10,9 @@ from src.model.processor import process_input_text
 from ..prompts import (get_query, get_target, 
                        IMAGE_TASKS, VIDEO_TASKS, VISDOC_TASKS,
                        format_description, format_text_for_chat_template, 
-                       extract_query_from_mmeb, extract_target_from_mmeb)
+                       extract_query, extract_target)
 
-TASK_INST_TGT = "Represent the following text answer to a question.\nAnswer: "
+TASK_INST_TGT = "Represent the following text:\n"
 
 DATASET_PARSER_NAME = "ssv2"
 @AutoEvalPairDataset.register(DATASET_PARSER_NAME)
@@ -35,12 +35,6 @@ class SSV2EvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def _load_hf_dataset(self):
         return load_hf_dataset(EVAL_DATASET_HF_PATH[self.dataset_name]), None
 
-    def add_signature_columns(self):
-
-        self.dataset = self.dataset.add_column("cand_key_text", self.dataset["pos_text"])
-        self.dataset = self.dataset.add_column("cand_key_mm", [""] * len(self.dataset))
-
-
     def _add_signature_columns_map_func(self, batch_dict):
         signature_columns = {
 
@@ -49,7 +43,7 @@ class SSV2EvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "query_key_text": [""] * len(batch_dict['video_id']),
             "query_key_mm": batch_dict['video_id'],
             "cand_key_text": batch_dict['pos_text'],
-            "cand_key_mm": [""] * len(batch_dict['question'])}
+            "cand_key_mm": [""] * len(batch_dict['video_id'])}
         return batch_dict | signature_columns
 
     @add_metainfo_hook

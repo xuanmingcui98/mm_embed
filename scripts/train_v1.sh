@@ -42,7 +42,7 @@ srun torchrun --nnodes $NNODES --nproc_per_node $GPU_PER_NODE --rdzv_id=$rdzv_id
      --temperature 0.02 --dataloader_num_workers 4 --dataset_config configs/train/train_image.yaml \
      --run_name $EXP_NAME --output_dir $EXP_DIR --grad_cache True --per_device_train_batch_size 128 \
      --gc_q_chunk_size 8 --gc_p_chunk_size 8 --interleave_batch_size 0.0625 --lr_scheduler_type linear \
-     --learning_rate 2e-4 --num_train_epochs 1 --warmup_ratio 0.05 --save_steps 100 --logging_steps 1 \
+     --learning_rate 2e-4 --num_train_epochs 1 --max_steps 625 --warmup_ratio 0.05 --save_steps 100 --logging_steps 1 \
      --save_safetensors True --remove_unused_columns False --resume_from auto --report_to wandb 2>&1 | tee $EXP_DIR/train.log
 
 

@@ -27,12 +27,20 @@ class YouCook2EvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def _load_hf_dataset(self):
         return load_hf_dataset(EVAL_DATASET_HF_PATH[self.dataset_config['dataset_name']]), None
 
+    def _add_signature_columns_map_func(self, batch_dict):
+        signature_columns = {
+            "query_key_text": batch_dict['sentence'],
+            "query_key_mm": [''] * len(batch_dict['sentence']),
+            "cand_key_text": [''] * len(batch_dict['sentence']),
+            "cand_key_mm": batch_dict['video_path']}
+        return batch_dict | signature_columns
+
     # def add_signature_columns(self):
     #     self.dataset = self.dataset.add_column("cand_key_text", [""] * len(self.dataset))
     #     self.dataset = self.dataset.add_column("cand_key_mm", self.dataset['video_path'])
 
     @add_metainfo_hook
-    def batch_process(self, batch_dict, **kwargs):
+    def batch_preprocess(self, batch_dict, **kwargs):
         image_resolution, model_backbone = kwargs['image_resolution'], kwargs['model_backbone']
         num_frames, max_frames_saved = kwargs['num_frames'], kwargs['max_frames_saved']
         video_root, frame_root = kwargs['video_root'], kwargs['frame_root']
