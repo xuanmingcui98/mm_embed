@@ -181,15 +181,8 @@ class BaseDatasetProcessor:
         self.column_names = self.dataset.column_names
         self.dataset = sample_dataset(self.dataset, **dataset_config)
         num_rows = self.dataset.num_rows
-        world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
         n_workers_per_node = self.training_args.dataloader_num_workers if self.training_args.dataloader_num_workers > 0 else 1
-
-        # determine num_shards by the length of dataset and per device batch size.
-        min_shards_to_bs_ratio = 10
-        num_shards = min(len(self.dataset), 8 * world_size * n_workers_per_node, num_rows // (self.training_args.per_device_train_batch_size * min_shards_to_bs_ratio * world_size))
-        self.dataset = self.dataset.to_iterable_dataset(num_shards=num_shards)
-        # self.dataset = self.dataset.shuffle(buffer_size=10_000, seed=self.training_args.seed)
-        # self.dataset = self.dataset.to_iterable_dataset(num_shards=n_workers_per_node)
+        self.dataset = self.dataset.to_iterable_dataset(num_shards=n_workers_per_node)
         setattr(self.dataset, 'num_rows', num_rows)
 
     def load(self):
