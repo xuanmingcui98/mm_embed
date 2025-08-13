@@ -42,7 +42,7 @@ Instructions:
 - Write the description in 3–4 sentences
 - Avoid subjective opinions, speculation, or stylistic commentary.
 - Wrap the description and reasoning inside <think> ... </think> tags.
-- On a new line, output the final answer in this exact format: Answer: <answer>
+- On a new line, output a summary in this exact format: Answer: <answer>
 
 ---
 
