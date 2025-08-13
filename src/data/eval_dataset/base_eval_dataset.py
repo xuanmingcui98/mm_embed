@@ -1,3 +1,6 @@
+from PIL import ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+
 from abc import ABCMeta, abstractmethod
 from functools import wraps
 import pickle, os
@@ -10,10 +13,11 @@ from ..prompts import (get_query, get_target,
                        format_description, format_text_for_chat_template, 
                        extract_query, extract_target)
 import torch
-from src.model.processor import process_input_text
+from ...model.processor import process_input_text
 from ..utils.dataset_utils import load_hf_dataset, sample_dataset
 from ..dataset_hf_path import EVAL_DATASET_HF_PATH
-from src.data.eval_dataset.video_classification_utils import VIDEOCLS_LABEL_MAPPING, DATASET_INSTRUCTION
+from ...model.processor import VLM_VIDEO_TOKENS
+from .video_classification_utils import VIDEOCLS_LABEL_MAPPING, DATASET_INSTRUCTION
 from src.data.utils.vision_utils import save_frames, process_video_frames
 
 
@@ -247,7 +251,8 @@ class BaseEvalDatasetProcessor:
 
         self.dataset, self.corpus = self._load_hf_dataset()
         # debug: take 1 row
-        # self.dataset = self.dataset.select(range(1))
+        if self.data_args.debug_prompt:
+            self.dataset = self.dataset.select(range(1))
         self.dataset = sample_dataset(self.dataset, **self.dataset_config)
         # self.add_signature_columns()
         # if self.data_args.apply_chat_template:
@@ -310,6 +315,8 @@ class BaseEvalDatasetProcessor:
         return cand_dataset
 
     def format_text_for_chat_template(self, is_query, text, image_path=None, video_path=None, add_generation_prompt=False, key=None):
+
+        text = text.replace(VLM_VIDEO_TOKENS[self.dataset_config["model_backbone"]], "").replace(VLM_IMAGE_TOKENS[self.dataset_config["model_backbone"]], "")
 
         desc = self.query_descriptions if is_query else self.target_descriptions
 
@@ -455,18 +462,20 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
                     cand_texts.append(tgts)
             else:
                 qry_text = get_query(self.subset_name, qry_text, self.data_args.use_cot)
-                qry_text = self.format_text_for_chat_template(qry_text, qry_image_path, description=qry_description, add_generation_prompt=self.model_args.do_sft_query)
+                qry_text = self.format_text_for_chat_template(True, 
+                                                              text=qry_text, 
+                                                              image_path=qry_image_path, 
+                                                              add_generation_prompt=self.model_args.do_sft_query,
+                                                              key=(qry_text, qry_image_path))
                 cand_text = []
                 for tgt_cap, tgt_img_path in zip(tgt_texts, tgt_image_paths):
                     if (tgt_cap, tgt_img_path) not in self.target_cache:
-                        description = None
-                        if self.target_descriptions is not None:
-                            description = format_description(self.target_descriptions[(tgt_cap, tgt_img_path)], self.data_args.use_cot)
-                        self.target_cache[(tgt_cap, tgt_img_path)] = self.format_text_for_chat_template(False, 
-                                                                                                        text=get_target(self.subset_name, tgt_cap, self.data_args.use_cot), 
-                                                                                                        image_path=tgt_img_path, 
-                                                                                                        description=description, 
-                                                                                                        add_generation_prompt=self.model_args.do_sft_target)
+                        self.target_cache[(tgt_cap, tgt_img_path)] = self.format_text_for_chat_template(
+                                                                        False, 
+                                                                        text=get_target(self.subset_name, tgt_cap, self.data_args.use_cot), 
+                                                                        image_path=tgt_img_path, 
+                                                                        add_generation_prompt=self.model_args.do_sft_target,
+                                                                        key=(tgt_cap, tgt_img_path))
                         
                     cand_text.append(self.target_cache[(tgt_cap, tgt_img_path)])
                 cand_texts.append(cand_text)
@@ -500,47 +509,6 @@ class MMEBV2EvalDatasetProcessor(BaseEvalDatasetProcessor):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    # def prepare_targets(self):
-    #     """
-    #         Precompute targets to avoid repetitive processing 1000x for each sample.
-    #     """
-
-    #     unique_pairs = set()
-    #     for row in self.dataset:
-    #         if not isinstance(row[self.cand_key_text], list):
-    #             unique_pairs.add((row[self.cand_key_text], row[self.cand_key_mm]))
-    #         else:
-    #             assert len(row[self.cand_key_text]) == len(row[self.cand_key_mm])
-    #             for cand_text, cand_mm in zip(row[self.cand_key_text], row[self.cand_key_mm]):
-    #                 unique_pairs.add((cand_text, cand_mm))
-
-    #     preprocessed_pairs = {}
-
-    #     for cand_text, cand_mm in unique_pairs:
-
-    #         description = self.target_descriptions[(cand_text, cand_mm)] if self.target_descriptions is not None else None
-
-    #         cand_text_processed = process_input_text(self.target_instruction, self.model_backbone, text=cand_text)
-    #         input_kwargs = {
-    #             "text": cand_text_processed,
-    #             "description": description,
-    #             "add_generation_prompt": self.model_args.do_sft_target
-    #         }
-
-    #         pos_image_input = pos_video_input = None
-    #         if cand_mm:
-    #             if len(cand_mm['paths']) > 1:
-    #                 pos_video_input = cand_mm['paths'][0] or cand_mm['bytes'][0]
-    #             else:
-    #                 pos_image_input = cand_mm['paths'][0] or cand_mm['bytes'][0]
-
-    #         input_kwargs["image_path"] = pos_image_input
-    #         input_kwargs["video_path"] = pos_video_input
-    #         preprocessed_pairs[(cand_text, cand_mm)] = self.format_text_for_chat_template(**input_kwargs)
-        
-    #     return preprocessed_pairs
-
-
     @add_metainfo_hook
     def batch_preprocess(self, batch_dict, *args, **kwargs):
 
@@ -549,7 +517,7 @@ class MMEBV2EvalDatasetProcessor(BaseEvalDatasetProcessor):
 
         for data_idx in range(batch_size):
             one_sample = self._process_one_sample(data_idx, batch_dict, *args, **kwargs)
-            query_text, query_image, cand_text, cand_image, dataset_infos = \
+            query_text, query_image, cand_text, cand_image, dataset_info = \
                 one_sample['query_text'], one_sample['query_image'], \
                 one_sample['cand_text'], one_sample['cand_image'], \
                 one_sample['dataset_infos']
@@ -557,20 +525,22 @@ class MMEBV2EvalDatasetProcessor(BaseEvalDatasetProcessor):
             if self.data_args.apply_chat_template:
 
                 query_image_input = query_video_input = None
+                
                 if query_image:
                     if len(query_image['paths']) > 1:
                         query_video_input = query_image['paths'][0] or query_image['bytes'][0]
                     else:
                         query_image_input = query_image['paths'][0] or query_image['bytes'][0]
                 
-
-                
                 query_key_text = batch_dict[self.query_key_text][data_idx] if self.query_key_text else ""
                 query_key_mm = batch_dict[self.query_key_mm][data_idx] if self.query_key_mm else ""
 
                 query_text = self.format_text_for_chat_template(
-                    is_query=True, text=query_text, image_path=query_image_input, video_path=query_video_input, 
-                    key=(query_key_text, query_key_mm))
+                                    is_query=True, 
+                                    text=query_text, 
+                                    image_path=query_image_input, 
+                                    video_path=query_video_input, 
+                                    key=(query_key_text, query_key_mm))
                 
                 cands = []
                 for single_cand_text, single_cand_image in zip(cand_text, cand_image):
@@ -583,23 +553,21 @@ class MMEBV2EvalDatasetProcessor(BaseEvalDatasetProcessor):
                     
                     single_cand_key_mm = cand_image_input or cand_video_input
                     if (single_cand_text, single_cand_key_mm) not in self.target_cache:
-                        description = None
-                        if self.target_descriptions is not None:
-                            description = format_description(self.target_descriptions[(single_cand_text, single_cand_key_mm)], self.data_args.use_cot)
-                        self.target_cache[(single_cand_text, single_cand_key_mm)] = self.format_text_for_chat_template(False, 
-                                                                                                        text=single_cand_text, 
-                                                                                                        image_path=cand_image_input, 
-                                                                                                        video_path=cand_video_input, 
-                                                                                                        description=description, 
-                                                                                                        add_generation_prompt=self.model_args.do_sft_target)
+                        self.target_cache[(single_cand_text, single_cand_key_mm)] = self.format_text_for_chat_template(
+                                                                                        False, 
+                                                                                        text=single_cand_text,
+                                                                                        image_path=cand_image_input,
+                                                                                        video_path=cand_video_input, 
+                                                                                        add_generation_prompt=self.model_args.do_sft_target,
+                                                                                        key=(single_cand_text, single_cand_key_mm))
                     cands.append(self.target_cache[(single_cand_text, single_cand_key_mm)])
                 cand_text = cands
 
-            query_texts.append(query_text)
-            query_images.append(query_image)
+            query_texts.append([query_text])
+            query_images.append([query_image])
             cand_texts.append(cand_text)
             cand_images.append(cand_image)
-
+            dataset_infos.append(dataset_info)
 
         return {"query_text": query_texts, "query_image": query_images,
                 "cand_text": cand_texts, "cand_image": cand_images,

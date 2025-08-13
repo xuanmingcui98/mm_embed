@@ -64,3 +64,4 @@ test.ipynb
 # src/data_orig/*
 
 # *_orig.py
+*.json

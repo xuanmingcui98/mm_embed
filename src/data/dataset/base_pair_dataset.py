@@ -1,3 +1,6 @@
+from PIL import ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+
 from abc import ABCMeta, abstractmethod
 from functools import wraps
 from datasets import Features, Value, Sequence
@@ -175,15 +178,18 @@ class BaseDatasetProcessor:
         self.dataset = self._load_hf_dataset()
         # self.add_signature_columns()
 
-        # TODO debug take only 1 sample
-        # self.dataset = self.dataset.select(range(10)) 
+        if self.data_args.debug_prompt:
+            print_master(f"Debug mode enabled")
+            self.dataset = self.dataset.select(range(1)) 
 
         self.column_names = self.dataset.column_names
         self.dataset = sample_dataset(self.dataset, **dataset_config)
         num_rows = self.dataset.num_rows
         n_workers_per_node = self.training_args.dataloader_num_workers if self.training_args.dataloader_num_workers > 0 else 1
-        self.dataset = self.dataset.to_iterable_dataset(num_shards=n_workers_per_node)
-        setattr(self.dataset, 'num_rows', num_rows)
+
+        if not data_args.debug_prompt:
+            self.dataset = self.dataset.to_iterable_dataset(num_shards=n_workers_per_node)
+            setattr(self.dataset, 'num_rows', num_rows)
 
     def load(self):
         num_rows = self.dataset.num_rows
@@ -200,7 +206,7 @@ class BaseDatasetProcessor:
                             batched=True, 
                             batch_size=64,
                             remove_columns=columns_to_remove,
-                            drop_last_batch=True # temp
+                            drop_last_batch=not self.data_args.debug_prompt # temp
                             )
 
         self.dataset = self.dataset.cast(MULTIMODAL_FEATURES)
@@ -225,7 +231,9 @@ class BaseDatasetProcessor:
         # self.dataset = self.dataset.add_column("task_id", [TASK2ID[self.subset_name]] * num_rows)
 
         print_master(f"Loaded {self.data_parser_name}/{self.subset_name} dataset with {num_rows} samples")
-        setattr(self.dataset, 'num_rows', num_rows)
+        if not self.data_args.debug_prompt:
+
+            setattr(self.dataset, 'num_rows', num_rows)
         
         return self.dataset
 

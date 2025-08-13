@@ -24,62 +24,98 @@ class MSRVTTEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                  **dataset_config):
 
         super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, processor, 
-                         query_instruction=TASK_INST_QRY, target_instruction=TASK_INST_TGT, target_modality="video",
+                         query_key_text='caption', query_key_mm=None,
+                         cand_key_text=None, cand_key_mm='video_id',
                          **dataset_config)
-
-    def _add_signature_columns_map_func(self, batch_dict):
-        signature_columns = {
-
-            # @xuanming we assume modality in the order of text, image, video
-            # current assume two modalities max for query and target
-            "query_key_text": batch_dict['caption'],
-            "query_key_mm": [""] * len(batch_dict['caption']),
-            "cand_key_text": [""] * len(batch_dict['caption']),
-            "cand_key_mm": batch_dict['video_id']}
-        return batch_dict | signature_columns
 
     def _load_hf_dataset(self):
         return load_hf_dataset(EVAL_DATASET_HF_PATH[self.dataset_config['dataset_name']]), None
 
-    @add_metainfo_hook
-    def batch_preprocess(self, batch_dict, **kwargs):
-        image_resolution, model_backbone = kwargs['image_resolution'], kwargs['model_backbone']
-        num_frames, max_frames_saved = kwargs['num_frames'], kwargs['max_frames_saved']
-        video_root, frame_root = kwargs['video_root'], kwargs['frame_root']
-        model_backbone = kwargs['model_backbone']
+    def _process_one_sample(self, data_idx, batch_dict, **kwargs):
+        image_resolution = kwargs["image_resolution"]
+        max_frames_saved = kwargs["max_frames_saved"]
+        num_frames       = kwargs["num_frames"]
+        model_backbone   = kwargs["model_backbone"]
+        video_root       = kwargs["video_root"]
+        frame_root       = kwargs["frame_root"]
 
-        query_texts, query_images, cand_texts, cand_images, dataset_infos = [], [], [], [], []
-        for video_name, video_path, caption in (
-                zip(batch_dict['video_id'], batch_dict['video'], batch_dict['caption'])):
+        # Fields for this sample
+        video_name = batch_dict["video_id"][data_idx]
+        rel_video_path = batch_dict["video"][data_idx]
+        caption = batch_dict["caption"][data_idx]
+
+        # Paths
+        abs_video_path = os.path.join(video_root, rel_video_path)
+        frame_dir = os.path.join(frame_root, video_name)
+
+        # Ensure frames exist and sample them
+        save_frames(video_path=abs_video_path, frame_dir=frame_dir, max_frames_saved=max_frames_saved)
+        frame_paths = process_video_frames(frame_dir, num_frames=num_frames)
+
+        # Query: text only (no query-side image/video)
+        query_text  = process_input_text(TASK_INST_QRY, model_backbone, text=caption)
+        query_image = None
+
+        # Candidate: video frames as image dict + generic target text
+        cand_text = [process_input_text(TASK_INST_TGT, model_backbone, add_video_token=True)]
+        cand_image = [{
+            "bytes": [None] * len(frame_paths),
+            "paths": frame_paths,
+            "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)] * len(frame_paths),
+        }]
+
+        dataset_info = {
+            "cand_names": [video_name],
+            "label_name": video_name,
+        }
+
+        return {
+            "query_text": query_text,
+            "query_image": query_image,
+            "cand_text": cand_text,
+            "cand_image": cand_image,
+            "dataset_infos": dataset_info,
+        }
+
+    # @add_metainfo_hook
+    # def batch_preprocess(self, batch_dict, **kwargs):
+    #     image_resolution, model_backbone = kwargs['image_resolution'], kwargs['model_backbone']
+    #     num_frames, max_frames_saved = kwargs['num_frames'], kwargs['max_frames_saved']
+    #     video_root, frame_root = kwargs['video_root'], kwargs['frame_root']
+    #     model_backbone = kwargs['model_backbone']
+
+    #     query_texts, query_images, cand_texts, cand_images, dataset_infos = [], [], [], [], []
+    #     for video_name, video_path, caption in (
+    #             zip(batch_dict['video_id'], batch_dict['video'], batch_dict['caption'])):
 
 
-            video_path = os.path.join(video_root, video_path)
-            frame_dir = os.path.join(frame_root, video_name)
-            save_frames(video_path=video_path, frame_dir=frame_dir, max_frames_saved=max_frames_saved)
-            video_frame_paths = process_video_frames(frame_dir, num_frames=num_frames)
+    #         video_path = os.path.join(video_root, video_path)
+    #         frame_dir = os.path.join(frame_root, video_name)
+    #         save_frames(video_path=video_path, frame_dir=frame_dir, max_frames_saved=max_frames_saved)
+    #         video_frame_paths = process_video_frames(frame_dir, num_frames=num_frames)
 
-            if self.apply_chat_template:
-                query_texts.append([self.format_text_for_chat_template(
-                    process_input_text(TASK_INST_QRY, model_backbone, text=caption), video_path=frame_dir, add_generation_prompt=self.model_args.do_sft_query)])
-                cand_texts.append([self.prepared_targets[("", video_name)]])
-            else:
-                query_texts.append([process_input_text(TASK_INST_QRY, model_backbone)])
-                cand_texts.append([process_input_text(TASK_INST_TGT, model_backbone, add_video_token=True)])
-            query_images.append([None])
-            cand_images.append([ImageVideoInstance(
-                bytes=[None] * num_frames,
-                paths=video_frame_paths,
-                resolutions=[RESOLUTION_MAPPING.get(image_resolution, None)] * num_frames,
-            ).to_dict()])
-            dataset_infos.append({
-                "cand_names": [video_name],
-                "label_name": video_name,
-            })
+    #         if self.apply_chat_template:
+    #             query_texts.append([self.format_text_for_chat_template(
+    #                 process_input_text(TASK_INST_QRY, model_backbone, text=caption), video_path=frame_dir, add_generation_prompt=self.model_args.do_sft_query)])
+    #             cand_texts.append([self.prepared_targets[("", video_name)]])
+    #         else:
+    #             query_texts.append([process_input_text(TASK_INST_QRY, model_backbone)])
+    #             cand_texts.append([process_input_text(TASK_INST_TGT, model_backbone, add_video_token=True)])
+    #         query_images.append([None])
+    #         cand_images.append([ImageVideoInstance(
+    #             bytes=[None] * num_frames,
+    #             paths=video_frame_paths,
+    #             resolutions=[RESOLUTION_MAPPING.get(image_resolution, None)] * num_frames,
+    #         ).to_dict()])
+    #         dataset_infos.append({
+    #             "cand_names": [video_name],
+    #             "label_name": video_name,
+    #         })
 
-        processed_batch = {"query_text": query_texts, "query_image": query_images,
-                "cand_text": cand_texts, "cand_image": cand_images,
-                "dataset_infos": dataset_infos}
-        return batch_dict | processed_batch
+    #     processed_batch = {"query_text": query_texts, "query_image": query_images,
+    #             "cand_text": cand_texts, "cand_image": cand_images,
+    #             "dataset_infos": dataset_infos}
+    #     return batch_dict | processed_batch
 
 
 # DATASET_PARSER_NAME = "msrvtt"

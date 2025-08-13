@@ -123,7 +123,7 @@ def get_result_summary(dir):
 
         # get one level up directory
 
-        output_json_path = os.path.join(os.path.dirname(base_path), f"{final_metadata['model_name']}.json")
+        output_json_path = os.path.join(os.path.dirname(base_path), f"summary_ours.json")
         try:
             with open(output_json_path, "w") as f:
                 json.dump(final_output, f, indent=4)

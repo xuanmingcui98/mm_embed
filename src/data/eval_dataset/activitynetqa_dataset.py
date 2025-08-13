@@ -100,9 +100,8 @@ class ActivityNetQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             cap.release()
             # print(f'[{DATASET_PARSER_NAME}] Extracted #frames: {saved_frames}, dumped to {frame_dir}')
 
-        query_text = [query]
         qry_frame_paths = process_video_frames(frame_dir, num_frames=num_frames)
-        query_images = [{"bytes": [None] * len(qry_frame_paths), "paths": qry_frame_paths, "resolutions": [None] * len(qry_frame_paths)}]
+        query_images = {"bytes": [None] * len(qry_frame_paths), "paths": qry_frame_paths, "resolutions": [None] * len(qry_frame_paths)}
         cand_images = [None] * len(OPTIONS)
         dataset_info = {
                 "question_id": question_id,
@@ -116,7 +115,7 @@ class ActivityNetQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             }
 
         return {
-            "query_text": query_text,
+            "query_text": query,
             "query_image": query_images,
             "cand_text": OPTIONS,
             "cand_image": cand_images,

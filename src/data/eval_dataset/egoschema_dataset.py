@@ -37,85 +37,171 @@ class EgoSchemaEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                  **dataset_config):
 
         super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, processor, 
-                            query_key_text="question", query_key_mm="video_idx",
-                            # cand_key_text
+                         query_key_text="question", query_key_mm="video_idx",
+                         cand_key_text="option", cand_key_mm=None,
                          **dataset_config)
+        
+    def _load_hf_dataset(self):
+        return load_dataset(DATASET_HF_PATH, "Subset", split="test"), None
 
-    @add_metainfo_hook
-    def batch_process(self, batch_dict, *args, **kwargs):
-        model_backbone = kwargs['model_backbone']
-        image_resolution = kwargs['image_resolution']
-        max_frames_saved = kwargs['max_frames_saved']
-        video_root = kwargs['video_root']
-        frame_root = kwargs['frame_root']
-        num_frames = kwargs['num_frames']
-        query_texts, query_images, cand_texts, cand_images, dataset_infos = [], [], [], [], []
-        batch_size = len(batch_dict['question']) if batch_dict['question'] else 0
-        for video_idx, query, answer_idx, question_idx, options in \
-                zip(batch_dict['video_idx'], batch_dict['question'], batch_dict['answer'], batch_dict['question_idx'], batch_dict['option']):
-            orig_query = query
-            query = process_query(query + ' '.join(options), prompt=TASK_PROMPT, video_token=VLM_VIDEO_TOKENS[model_backbone])
-            answer_idx = int(answer_idx)
+    def _process_one_sample(self, data_idx, batch_dict, *args, **kwargs):
+        model_backbone   = kwargs["model_backbone"]
+        image_resolution = kwargs["image_resolution"]  # unused here (res kept as None to match original)
+        max_frames_saved = kwargs["max_frames_saved"]
+        video_root       = kwargs["video_root"]
+        frame_root       = kwargs["frame_root"]
+        num_frames       = kwargs["num_frames"]
+
+        # Pull this sample's fields
+        video_idx    = batch_dict["video_idx"][data_idx]
+        query        = batch_dict["question"][data_idx]
+        answer_idx   = int(batch_dict["answer"][data_idx])
+        question_idx = batch_dict["question_idx"][data_idx]
+        options      = batch_dict["option"][data_idx]
+
+        # Build query text (original concatenates options into the prompt)
+        query = process_query(
+            query + " " + " ".join(options),
+            prompt=TASK_PROMPT,
+            video_token=VLM_VIDEO_TOKENS[model_backbone],
+        )
+
+        # Paths
+        video_path = f"{video_root}/{video_idx}.mp4"
+        frame_dir  = f"{frame_root}/{video_idx}"
+
+        # Ensure frames exist (extract via OpenCV if missing)
+        frames = load_frames(frame_dir)
+        if not frames:
+            print(f"Extracting frames for: {video_path}")
+            os.makedirs(frame_dir, exist_ok=True)
+            assert os.path.exists(video_path)
+            cap = cv2.VideoCapture(video_path)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            step = max(1, total_frames // max_frames_saved)
+            frame_idx = 0
+            saved_frames = 0
+            while saved_frames < max_frames_saved:
+                assert cap.isOpened(), "not cap.isOpened()"
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frame_path = os.path.join(frame_dir, f"{saved_frames:04d}.jpeg")
+                cv2.imwrite(frame_path, frame)
+                saved_frames += 1
+                frame_idx += step
+            cap.release()
+            print(f"[{DATASET_PARSER_NAME}] Extracted #frames: {saved_frames}, dumped to {frame_dir}")
+
+        # Sample/query frames for the query side (video context lives on the query)
+        qry_frame_paths = process_video_frames(frame_dir, num_frames=num_frames)
+        query_image = {
+            "bytes": [None] * len(qry_frame_paths),
+            "paths": qry_frame_paths,
+            "resolutions": [None] * len(qry_frame_paths),
+        }
+
+        # Candidates: text-only multiple choice; no images
+        cand_text  = [o[o.find(". "):].strip(". ") for o in options]  # mirrors original slicing
+        cand_image = [None] * len(options)
+
+        dataset_info = {
+            "question_id": question_idx,
+            "video_id": video_idx,
+            "query": query,
+            "cand_names": options,
+            "answer": options[answer_idx],
+            "label_name": options[answer_idx],
+            "answer_idx": answer_idx,
+            "qry_frame_paths": qry_frame_paths,
+        }
+
+        return {
+            "query_text": query,        # raw (parent will apply chat template if enabled)
+            "query_image": query_image, # dict with paths/bytes/resolutions; parent detects video via len(paths)>1
+            "cand_text": cand_text,     # list[str]
+            "cand_image": cand_image,   # list[None], zipped with cand_text
+            "dataset_infos": dataset_info,
+        }
+
+
+
+    # @add_metainfo_hook
+    # def batch_preprocess(self, batch_dict, *args, **kwargs):
+    #     model_backbone = kwargs['model_backbone']
+    #     image_resolution = kwargs['image_resolution']
+    #     max_frames_saved = kwargs['max_frames_saved']
+    #     video_root = kwargs['video_root']
+    #     frame_root = kwargs['frame_root']
+    #     num_frames = kwargs['num_frames']
+    #     query_texts, query_images, cand_texts, cand_images, dataset_infos = [], [], [], [], []
+    #     batch_size = len(batch_dict['question']) if batch_dict['question'] else 0
+    #     for video_idx, query, answer_idx, question_idx, options in \
+    #             zip(batch_dict['video_idx'], batch_dict['question'], batch_dict['answer'], batch_dict['question_idx'], batch_dict['option']):
+    #         orig_query = query
+    #         query = process_query(query + ' '.join(options), prompt=TASK_PROMPT, video_token=VLM_VIDEO_TOKENS[model_backbone])
+    #         answer_idx = int(answer_idx)
             
-            video_path = f'{video_root}/{video_idx}.mp4'
-            frame_dir = f'{frame_root}/{video_idx}'
-            frames = load_frames(frame_dir)
-            if not frames:
-                print(f'Extracting frames for: {video_path}')
-                os.makedirs(frame_dir, exist_ok=True)
-                assert os.path.exists(video_path)
-                cap = cv2.VideoCapture(video_path)
-                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                step = max(1, total_frames // max_frames_saved)
-                frame_idx = 0
-                saved_frames = 0
-                while saved_frames < max_frames_saved:
-                    assert cap.isOpened(), "not cap.isOpened()"
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)  # Move to specific frame
-                    ret, frame = cap.read()
-                    if not ret:
-                        break
-                    frame_path = os.path.join(frame_dir, f"{saved_frames:04d}.jpeg")
-                    cv2.imwrite(frame_path, frame)
-                    saved_frames += 1
-                    frame_idx += step
-                cap.release()
-                print(f'[{DATASET_PARSER_NAME}] Extracted #frames: {saved_frames}, dumped to {frame_dir}')
+    #         video_path = f'{video_root}/{video_idx}.mp4'
+    #         frame_dir = f'{frame_root}/{video_idx}'
+    #         frames = load_frames(frame_dir)
+    #         if not frames:
+    #             print(f'Extracting frames for: {video_path}')
+    #             os.makedirs(frame_dir, exist_ok=True)
+    #             assert os.path.exists(video_path)
+    #             cap = cv2.VideoCapture(video_path)
+    #             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    #             step = max(1, total_frames // max_frames_saved)
+    #             frame_idx = 0
+    #             saved_frames = 0
+    #             while saved_frames < max_frames_saved:
+    #                 assert cap.isOpened(), "not cap.isOpened()"
+    #                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)  # Move to specific frame
+    #                 ret, frame = cap.read()
+    #                 if not ret:
+    #                     break
+    #                 frame_path = os.path.join(frame_dir, f"{saved_frames:04d}.jpeg")
+    #                 cv2.imwrite(frame_path, frame)
+    #                 saved_frames += 1
+    #                 frame_idx += step
+    #             cap.release()
+    #             print(f'[{DATASET_PARSER_NAME}] Extracted #frames: {saved_frames}, dumped to {frame_dir}')
 
-            qry_frame_paths = process_video_frames(frame_dir, num_frames=num_frames)
-            # print(f'[{DATASET_PARSER_NAME}] Loaded #frames: {len(qry_frame_paths)}, from {frame_dir}')
-            qry_frames = {"bytes": [None] * len(qry_frame_paths), "paths": qry_frame_paths, "resolutions": [None] * len(qry_frame_paths)}
-            query_images.append([qry_frames])
+    #         qry_frame_paths = process_video_frames(frame_dir, num_frames=num_frames)
+    #         # print(f'[{DATASET_PARSER_NAME}] Loaded #frames: {len(qry_frame_paths)}, from {frame_dir}')
+    #         qry_frames = {"bytes": [None] * len(qry_frame_paths), "paths": qry_frame_paths, "resolutions": [None] * len(qry_frame_paths)}
+    #         query_images.append([qry_frames])
 
-            if self.apply_chat_template:
-                query_texts.append([self.format_text_for_chat_template(query, 
-                                                                       video_path=frame_dir, 
-                                                                       description=self.query_descriptions[(orig_query, video_idx)] if self.query_descriptions is not None else None,
-                                                                       add_generation_prompt=self.model_args.do_sft_query)])
-                cand_texts.append([self.format_text_for_chat_template(o[o.find('. '):].strip('. '),
-                                                                      add_generation_prompt=False) for o in options])
-            else:
-                query_texts.append([query])
-                cand_texts.append([o[o.find('. '):].strip('. ') for o in options])
-            cand_images.append([None] * len(options))
-            dataset_info = {
-                "question_id": question_idx,
-                "video_id": video_idx,
-                "query": query,
-                "cand_names": options,
-                "answer": options[answer_idx],
-                "label_name": options[answer_idx],
-                "answer_idx": answer_idx,
-                "qry_frame_paths": qry_frame_paths,
-            }
-            dataset_infos.append(dataset_info)
-        if len(query_texts) == 0:
-            print('something went wrong')
-        # print_rank(f"dataset.map(): global_dataset_name={kwargs.get('global_dataset_name', DATASET_PARSER_NAME)}, batch_size={batch_size}, processed_batch_size={len(query_texts)}")
-        processed_batch = {"query_text": query_texts, "query_image": query_images,
-                "cand_text": cand_texts, "cand_image": cand_images,
-                "dataset_infos": dataset_infos}
-        return batch_dict | processed_batch
+    #         if self.apply_chat_template:
+    #             query_texts.append([self.format_text_for_chat_template(query, 
+    #                                                                    video_path=frame_dir, 
+    #                                                                    description=self.query_descriptions[(orig_query, video_idx)] if self.query_descriptions is not None else None,
+    #                                                                    add_generation_prompt=self.model_args.do_sft_query)])
+    #             cand_texts.append([self.format_text_for_chat_template(o[o.find('. '):].strip('. '),
+    #                                                                   add_generation_prompt=False) for o in options])
+    #         else:
+    #             query_texts.append([query])
+    #             cand_texts.append([o[o.find('. '):].strip('. ') for o in options])
+    #         cand_images.append([None] * len(options))
+    #         dataset_info = {
+    #             "question_id": question_idx,
+    #             "video_id": video_idx,
+    #             "query": query,
+    #             "cand_names": options,
+    #             "answer": options[answer_idx],
+    #             "label_name": options[answer_idx],
+    #             "answer_idx": answer_idx,
+    #             "qry_frame_paths": qry_frame_paths,
+    #         }
+    #         dataset_infos.append(dataset_info)
+    #     if len(query_texts) == 0:
+    #         print('something went wrong')
+    #     # print_rank(f"dataset.map(): global_dataset_name={kwargs.get('global_dataset_name', DATASET_PARSER_NAME)}, batch_size={batch_size}, processed_batch_size={len(query_texts)}")
+    #     processed_batch = {"query_text": query_texts, "query_image": query_images,
+    #             "cand_text": cand_texts, "cand_image": cand_images,
+    #             "dataset_infos": dataset_infos}
+    #     return batch_dict | processed_batch
 
 
 # DATASET_PARSER_NAME = "egoschema"

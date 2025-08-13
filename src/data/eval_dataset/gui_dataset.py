@@ -29,6 +29,7 @@ def process_multi_images(image_basedir, image_paths) -> List[str]:
 
     return img_path_list
 
+# not used currently
 @AutoEvalPairDataset.register(DATASET_PARSER_NAME)
 class GuiEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self,                 
@@ -38,7 +39,9 @@ class GuiEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                  processor, 
                  **dataset_config):
 
-        super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, processor, **dataset_config)
+        super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, processor, 
+                        #  query_key_text="qry_text"
+                         **dataset_config)
 
     def _load_hf_dataset(self):
         dataset_split = self.dataset_config.get("dataset_split", "limit_10_ood_test")

@@ -71,6 +71,7 @@ class DataArguments:
     query_description_dir: str = field(default=None, metadata={"help": "directory for saving descriptions"})
     apply_chat_template: bool = field(default=True, metadata={"help": "apply chat template to the dataset"})
     target_description_dir: str = field(default=None, metadata={"help": "directory for target descriptions"})
+    debug_prompt: bool = field(default=False, metadata={"help": "debug mode, will not use the dataset_config and will use the dataset_name and subset_name instead"})
 
 
 @dataclass

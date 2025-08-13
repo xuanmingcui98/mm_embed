@@ -25,9 +25,8 @@ class SSV2EvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                  **dataset_config):
 
         super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, processor, 
-                         query_instruction=DATASET_INSTRUCTION[dataset_config['dataset_name']],
-                         target_instruction=TASK_INST_TGT,
-                         target_modality="text", 
+                         query_key_text=None, query_key_mm='video_id',
+                         cand_key_text='pos_text', cand_key_mm=None,
                          **dataset_config)
 
         self.dataset_config['image_resolution'] = data_args.image_resolution
@@ -35,59 +34,108 @@ class SSV2EvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def _load_hf_dataset(self):
         return load_hf_dataset(EVAL_DATASET_HF_PATH[self.dataset_name]), None
 
-    def _add_signature_columns_map_func(self, batch_dict):
-        signature_columns = {
+    # def _add_signature_columns_map_func(self, batch_dict):
+    #     signature_columns = {
 
-            # @xuanming we assume modality in the order of text, image, video
-            # current assume two modalities max for query and target
-            "query_key_text": [""] * len(batch_dict['video_id']),
-            "query_key_mm": batch_dict['video_id'],
-            "cand_key_text": batch_dict['pos_text'],
-            "cand_key_mm": [""] * len(batch_dict['video_id'])}
-        return batch_dict | signature_columns
+    #         # @xuanming we assume modality in the order of text, image, video
+    #         # current assume two modalities max for query and target
+    #         "query_key_text": [""] * len(batch_dict['video_id']),
+    #         "query_key_mm": batch_dict['video_id'],
+    #         "cand_key_text": batch_dict['pos_text'],
+    #         "cand_key_mm": [""] * len(batch_dict['video_id'])}
+    #     return batch_dict | signature_columns
 
-    @add_metainfo_hook
-    def batch_preprocess(self, batch_dict, **kwargs):
-        image_resolution = kwargs['image_resolution']
-        num_frames, max_frames_saved = kwargs['num_frames'], kwargs['max_frames_saved']
-        video_root, frame_root = kwargs['video_root'], kwargs['frame_root']
-        dataset_name = kwargs['dataset_name']
-        model_backbone = kwargs['model_backbone']
 
-        query_texts, query_images, cand_texts, cand_images, dataset_infos = [], [], [], [], []
-        for video_id, pos_text, cand_text in \
-            zip(batch_dict['video_id'], batch_dict['pos_text'], batch_dict['neg_text']):
+    def _process_one_sample(self, data_idx, batch_dict, **kwargs):
+        image_resolution = kwargs["image_resolution"]
+        num_frames       = kwargs["num_frames"]
+        max_frames_saved = kwargs["max_frames_saved"]
+        video_root       = kwargs["video_root"]
+        frame_root       = kwargs["frame_root"]
+        dataset_name     = kwargs["dataset_name"]
+        model_backbone   = kwargs["model_backbone"]
 
-            video_path = os.path.join(video_root, str(video_id) + '.mp4')
-            frame_dir = os.path.join(frame_root, str(video_id))
-            save_frames(video_path=video_path, frame_dir=frame_dir, max_frames_saved=max_frames_saved)
-            video_frame_paths = process_video_frames(frame_dir, num_frames=num_frames)
+        # Fields
+        video_id  = batch_dict["video_id"][data_idx]
+        pos_text  = batch_dict["pos_text"][data_idx]
+        cand_list = batch_dict["neg_text"][data_idx]  # list of negatives
 
-            if self.apply_chat_template:
-                query_texts.append([format_text_for_chat_template(
-                    self.processor, process_input_text(DATASET_INSTRUCTION[dataset_name], model_backbone), video_path=frame_dir)])
-                cand_texts.append(self.prepared_targets[("", pos_text)])
-            else:
-                query_texts.append([process_input_text(DATASET_INSTRUCTION[dataset_name], model_backbone, add_video_token=True)])
-                cand_texts.append(cand_text)
+        # Paths
+        video_path = os.path.join(video_root, f"{video_id}.mp4")
+        frame_dir  = os.path.join(frame_root, str(video_id))
 
-            query_images.append([ImageVideoInstance(
-                bytes=[None] * len(video_frame_paths),
-                paths=video_frame_paths,
-                resolutions=[RESOLUTION_MAPPING.get(image_resolution, None)] * len(video_frame_paths),
-            ).to_dict()])
+        # Ensure frames exist and sample
+        save_frames(video_path=video_path, frame_dir=frame_dir, max_frames_saved=max_frames_saved)
+        frame_paths = process_video_frames(frame_dir, num_frames=num_frames)
 
-            cand_images.append([None] * len(cand_text))
-            dataset_info = {
-                "cand_names": cand_text,
-                "label_name": pos_text,
-            }
-            dataset_infos.append(dataset_info)
+        # Query: instruction text (video-token included for non-chat-template path)
+        query_text  = process_input_text(DATASET_INSTRUCTION[dataset_name], model_backbone, add_video_token=True)
+        query_image = {
+            "bytes": [None] * len(frame_paths),
+            "paths": frame_paths,
+            "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)] * len(frame_paths),
+        }
 
-        processed_batch = {"query_text": query_texts, "query_image": query_images,
-                "cand_text": cand_texts, "cand_image": cand_images,
-                "dataset_infos": dataset_infos}
-        return batch_dict | processed_batch
+        # Candidates: text only (negatives), no images
+        cand_text  = list(cand_list) if isinstance(cand_list, (list, tuple)) else [cand_list]
+        cand_image = [None] * len(cand_text)
+
+        dataset_info = {
+            "cand_names": cand_text,
+            "label_name": pos_text,
+        }
+
+        return {
+            "query_text": query_text,
+            "query_image": query_image,
+            "cand_text": cand_text,
+            "cand_image": cand_image,
+            "dataset_infos": dataset_info,
+        }
+
+
+    # @add_metainfo_hook
+    # def batch_preprocess(self, batch_dict, **kwargs):
+    #     image_resolution = kwargs['image_resolution']
+    #     num_frames, max_frames_saved = kwargs['num_frames'], kwargs['max_frames_saved']
+    #     video_root, frame_root = kwargs['video_root'], kwargs['frame_root']
+    #     dataset_name = kwargs['dataset_name']
+    #     model_backbone = kwargs['model_backbone']
+
+    #     query_texts, query_images, cand_texts, cand_images, dataset_infos = [], [], [], [], []
+    #     for video_id, pos_text, cand_text in \
+    #         zip(batch_dict['video_id'], batch_dict['pos_text'], batch_dict['neg_text']):
+
+    #         video_path = os.path.join(video_root, str(video_id) + '.mp4')
+    #         frame_dir = os.path.join(frame_root, str(video_id))
+    #         save_frames(video_path=video_path, frame_dir=frame_dir, max_frames_saved=max_frames_saved)
+    #         video_frame_paths = process_video_frames(frame_dir, num_frames=num_frames)
+
+    #         if self.apply_chat_template:
+    #             query_texts.append([format_text_for_chat_template(
+    #                 self.processor, process_input_text(DATASET_INSTRUCTION[dataset_name], model_backbone), video_path=frame_dir)])
+    #             cand_texts.append(self.prepared_targets[("", pos_text)])
+    #         else:
+    #             query_texts.append([process_input_text(DATASET_INSTRUCTION[dataset_name], model_backbone, add_video_token=True)])
+    #             cand_texts.append(cand_text)
+
+    #         query_images.append([ImageVideoInstance(
+    #             bytes=[None] * len(video_frame_paths),
+    #             paths=video_frame_paths,
+    #             resolutions=[RESOLUTION_MAPPING.get(image_resolution, None)] * len(video_frame_paths),
+    #         ).to_dict()])
+
+    #         cand_images.append([None] * len(cand_text))
+    #         dataset_info = {
+    #             "cand_names": cand_text,
+    #             "label_name": pos_text,
+    #         }
+    #         dataset_infos.append(dataset_info)
+
+    #     processed_batch = {"query_text": query_texts, "query_image": query_images,
+    #             "cand_text": cand_texts, "cand_image": cand_images,
+    #             "dataset_infos": dataset_infos}
+    #     return batch_dict | processed_batch
     
 # def load_ssv2_dataset(model_args, data_args, **kwargs):
 #     """

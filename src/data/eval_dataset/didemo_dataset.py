@@ -26,7 +26,7 @@ class DiDemoEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
 
         super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, processor, 
                          query_key_text="caption", query_key_mm = None,       
-                         cand_key_text=None, cand_key_mm="video"
+                         cand_key_text=None, cand_key_mm="video",
                          **dataset_config)
 
     def _load_hf_dataset(self):

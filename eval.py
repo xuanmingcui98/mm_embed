@@ -214,7 +214,7 @@ def main():
     with open(data_args.dataset_config, 'r') as yaml_file:
         dataset_configs = yaml.safe_load(yaml_file)
 
-    encode_output_path = os.path.join(model_args.checkpoint_path, "eval_debug2")
+    encode_output_path = os.path.join(model_args.checkpoint_path, "eval_ours")
     os.makedirs(encode_output_path, exist_ok=True)
     # --- Main Evaluation Loop ---
     for dataset_idx, (dataset_name, task_config) in enumerate(dataset_configs.items()):
@@ -223,6 +223,9 @@ def main():
             dist.barrier()
         print_master(f"--- Evaluating {dataset_name} ---")
 
+        if os.path.exists(os.path.join(encode_output_path, f"{dataset_name}_score.json")):
+            print_master(f"Skipping {dataset_name} as it has already been evaluated.")
+            continue
 
         query_embed_path = os.path.join(encode_output_path, f"{dataset_name}_qry")
         cand_embed_path = os.path.join(encode_output_path, f"{dataset_name}_tgt")
