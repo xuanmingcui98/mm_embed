@@ -1,7 +1,7 @@
 import os
 
 from src.data.dataset_hf_path import EVAL_DATASET_HF_PATH
-from src.data.eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, RESOLUTION_MAPPING, ImageVideoInstance, MMEBV2EvalDatasetProcessor
+from src.data.eval_dataset.base_eval_dataset import RESOLUTION_MAPPING, ImageVideoInstance, MMEBV2EvalDatasetProcessor
 from src.data.utils.dataset_utils import load_hf_dataset, sample_dataset
 from src.data.utils.vision_utils import save_frames, process_video_frames
 from src.model.processor import process_input_text
@@ -12,16 +12,11 @@ TASK_INST_TGT = "Understand the content of the provided video."
 
 DATASET_PARSER_NAME = "youcook2"
 # slightly less than the official one: https://github.com/antoine77340/MIL-NCE_HowTo100M/blob/master/csv/validation_youcook.csv?plain=1
-@AutoEvalPairDataset.register(DATASET_PARSER_NAME)
+@AutoPairDataset.register(DATASET_PARSER_NAME)
 class YouCook2EvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
-    def __init__(self,                 
-                 model_args, 
-                 data_args, 
-                 training_args, 
-                 processor, 
-                 **dataset_config):
+    def __init__(self, *args,**dataset_config):
 
-        super().__init__("youcook2", model_args, data_args, training_args, processor, 
+        super().__init__("youcook2", *args,
                          query_key_text="sentence", query_key_mm=None, cand_key_text=None, cand_key_mm="id", **dataset_config)
 
     def _load_hf_dataset(self):

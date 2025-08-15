@@ -5,7 +5,7 @@ import datasets
 from datasets import load_dataset
 import imageio
 
-from ..eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook
+from ..eval_dataset.base_eval_dataset import AutoPairDataset, add_metainfo_hook
 from ..utils.dataset_utils import sample_dataset
 from ..utils.vision_utils import process_video_frames, qa_template
 from src.model.processor import VLM_VIDEO_TOKENS
@@ -176,7 +176,7 @@ def data_prepare(batch_dict, *args, **kwargs):
 
 DATASET_PARSER_NAME = "mvbench"
 DATASET_HF_PATH = "OpenGVLab/MVBench"
-@AutoEvalPairDataset.register(DATASET_PARSER_NAME)
+@AutoPairDataset.register(DATASET_PARSER_NAME)
 def load_mvbench_dataset(model_args, data_args, *args, **kwargs):
     subsets = []
     for subset_name in subset_meta.keys():

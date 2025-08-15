@@ -4,7 +4,7 @@ import os, ast
 
 from torch.jit import isinstance
 from ..dataset.gui_dataset import DATASET_PARSER_NAME
-from ..eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, \
+from ..eval_dataset.base_eval_dataset import AutoPairDataset, add_metainfo_hook, \
     RESOLUTION_MAPPING
 from src.model.processor import PHI3V, VLM_IMAGE_TOKENS
 
@@ -68,7 +68,7 @@ def data_prepare(batch_dict, *args, **kwargs):
         return {"cand_text": query_texts, "cand_image": query_images, "dataset_infos": dataset_infos}
 
 
-@AutoEvalPairDataset.register(DATASET_PARSER_NAME)
+@AutoPairDataset.register(DATASET_PARSER_NAME)
 def load_gui_dataset(model_args, data_args, training_args, *args, **kwargs):
     dataset_name = kwargs.get("dataset_name", DATASET_PARSER_NAME)
     subset_name = kwargs.get("subset_name")

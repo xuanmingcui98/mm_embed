@@ -39,8 +39,9 @@ TEXT_EMBED_INSTRUCTION  = """Embed the following text:\n\n{text}"""
 IMAGE_EMBED_INSTRUCTION = """Given the image, generate a detailed description.\n\nEmbed the image with the description."""
 VISDOC_EMBED_INSTRUCTION = """Given the document image, generate a detailed description of the document.\n\nEmbed the document image with the description."""
 VIDEO_EMBED_INSTRUCTION = """Given the video, generate a detailed description of the video.\n\nEmbed the video with the description."""
-
-VISDOC_RETRIEVAL_INSTRUCTION = """Given a question, determine the visual document that would help answer the question.\n\nQuestion: {query}\n\nEmbed your answer."""
+VIDEO_QA_INSTRUCTION = """Given the video and the below question, answer the question based on the video.\n\nQuestion: {query}\n\nEmbed your answer."""
+IMAGE_QA_INSTRUCTION = """Given the image and the below question, answer the question based on the image.\n\nQuestion: {query}\n\nEmbed your answer."""
+VISDOC_QA_RETRIEVAL_INSTRUCTION = """Given a question, determine the visual document that would help answer the question.\n\nQuestion: {query}\n\nEmbed your answer."""
 
 
 def format_description(description, prompt_format="gt_only"):

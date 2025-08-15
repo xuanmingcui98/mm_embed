@@ -61,13 +61,13 @@ class ImageVideoInstance:
         }
 
 
-class AutoEvalPairDataset(metaclass=ABCMeta):
+class AutoPairDataset(metaclass=ABCMeta):
     # Base class for auto datasets.
     registry = {}
 
     def __init_subclass__(cls):
-        if cls.__name__ not in AutoEvalPairDataset.registry:
-            AutoEvalPairDataset.registry[cls.__name__] = cls
+        if cls.__name__ not in AutoPairDataset.registry:
+            AutoPairDataset.registry[cls.__name__] = cls
         else:
             raise RuntimeError('Subclass "{cls.__name__}" has already defined.')
 

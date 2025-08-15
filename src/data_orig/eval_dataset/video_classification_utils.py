@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 
 from datasets import load_dataset
-from ..eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, RESOLUTION_MAPPING
+from ..eval_dataset.base_eval_dataset import AutoPairDataset, add_metainfo_hook, RESOLUTION_MAPPING
 from ..utils.vision_utils import process_video_frames, load_frames
 
 

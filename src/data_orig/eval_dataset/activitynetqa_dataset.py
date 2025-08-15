@@ -5,7 +5,7 @@ import sys
 
 from datasets import load_dataset
 
-from ..eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook
+from ..eval_dataset.base_eval_dataset import AutoPairDataset, add_metainfo_hook
 from ..utils.dataset_utils import sample_dataset
 from ..utils.vision_utils import temporal_random_crop, process_video_frames, load_frames, qa_template
 from src.model.processor import VLM_VIDEO_TOKENS
@@ -120,7 +120,7 @@ def sub_sample(video_dir, video_export_dir):
 
 DATASET_PARSER_NAME = "activitynetqa"
 DATASET_HF_PATH = "lmms-lab/ActivityNetQA"
-@AutoEvalPairDataset.register(DATASET_PARSER_NAME)
+@AutoPairDataset.register(DATASET_PARSER_NAME)
 def load_activitynetqa_dataset(model_args, data_args, *args, **kwargs):
     # sub_sample(kwargs['video_dir'], kwargs['video_export_dir'])
     dataset = load_dataset('json', data_files=kwargs["data_path"])['train']

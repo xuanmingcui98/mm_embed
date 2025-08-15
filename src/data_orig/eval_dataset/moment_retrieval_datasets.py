@@ -2,7 +2,7 @@ import os
 
 from datasets import load_dataset
 from ..dataset_hf_path import EVAL_DATASET_HF_PATH
-from ..eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, RESOLUTION_MAPPING, ImageVideoInstance
+from ..eval_dataset.base_eval_dataset import AutoPairDataset, add_metainfo_hook, RESOLUTION_MAPPING, ImageVideoInstance
 from ..utils.dataset_utils import load_hf_dataset, sample_dataset
 from ..utils.vision_utils import save_frames, process_video_frames, VID_EXTENSIONS
 from src.model.processor import process_input_text
@@ -81,7 +81,7 @@ def data_prepare(batch_dict, *args, **kwargs):
 
 
 DATASET_PARSER_NAME = "moment_retrieval"
-@AutoEvalPairDataset.register(DATASET_PARSER_NAME)
+@AutoPairDataset.register(DATASET_PARSER_NAME)
 def load_moment_retrieval_dataset(model_args, data_args, **kwargs):
     if kwargs.get("data_path", None) != None:
         dataset = load_dataset("json", data_files=kwargs["data_path"])

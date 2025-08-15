@@ -1,11 +1,11 @@
 import os
 
 import datasets
-from ..dataset.base_pair_dataset import AutoPairDataset, add_metainfo_hook, MULTIMODAL_FEATURES, \
-    RESOLUTION_MAPPING, VideoDatasetProcessor
+from ..dataset.base_pair_dataset import RESOLUTION_MAPPING, VideoDatasetProcessor
 from src.model.processor import VLM_VIDEO_TOKENS
 from ..utils.vision_utils import process_video_frames
-
+from ..prompts import TEXT_EMBED_INSTRUCTION, VIDEO_EMBED_INSTRUCTION
+from ..loader.mixed_dataset import AutoPairDataset
 
 def process_conversations(conversations, video_token, prompt):
     query = conversations[0]["value"].replace("<video>", ''.join([video_token]))
@@ -14,19 +14,21 @@ def process_conversations(conversations, video_token, prompt):
     pos_text = conversations[1]["value"]
     return query, pos_text
 
-QA_QUERY_PROMPT="Answer a question based on the content of a video. "
-TASK_INST_TGT = "Represent the following text:\n"
+QA_QUERY_PROMPT = "" # "Answer a question based on the content of a video. "
+TASK_INST_TGT = "" # "Represent the following text:\n"
 
 DATASET_PARSER_NAME = "llavahound_qa"
 @AutoPairDataset.register(DATASET_PARSER_NAME)
+@AutoPairDataset.register_instruction("video_qa_240k",
+    {'query': """Given a video and the below question, answer the question based on the video.\n\nQuestion: {query}\n\nEmbed your answer.""",
+    'target': TEXT_EMBED_INSTRUCTION})
 class LLaVaHoundQADatasetProcessor(VideoDatasetProcessor):
-    def __init__(self, model_args, data_args, training_args, **kwargs):
-        super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, 
+    def __init__(self, *args, **dataset_config):
+        super().__init__(DATASET_PARSER_NAME, *args, **dataset_config,
                          query_key_text="conversations",
                          query_key_mm="video",
                          cand_key_text="conversations",
-                         cand_key_mm="video",
-                         **kwargs)
+                         cand_key_mm="video")
 
     def _load_hf_dataset(self):
         return datasets.load_dataset("json", split="train", data_files=self.dataset_config['dataset_path'], streaming=False)
@@ -99,7 +101,7 @@ class LLaVaHoundQADatasetProcessor(VideoDatasetProcessor):
 
 # DATASET_PARSER_NAME = "llavahound_qa"
 # @AutoPairDataset.register(DATASET_PARSER_NAME)
-# def load_llavahound_qa_dataset(model_args, data_args, training_args, *args, **kwargs):
+# def load_llavahound_qa_dataset(*args, *args, **kwargs):
 #     dataset_name = kwargs.get("dataset_name", DATASET_PARSER_NAME)
 #     assert "dataset_path" in kwargs, "`dataset_path` should be given for loading llavahound dataset."
 #     assert "num_frames" in kwargs, "`num_frames` should be given for loading llavahound dataset."

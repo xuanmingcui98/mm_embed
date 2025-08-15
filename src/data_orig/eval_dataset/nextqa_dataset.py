@@ -3,7 +3,7 @@ import sys
 
 from datasets import load_dataset
 
-from ..eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook
+from ..eval_dataset.base_eval_dataset import AutoPairDataset, add_metainfo_hook
 from ..utils.dataset_utils import sample_dataset
 from ..utils.vision_utils import temporal_random_crop, process_video_frames, load_frames, qa_template
 from src.model.processor import VLM_VIDEO_TOKENS
@@ -89,7 +89,7 @@ def data_prepare(batch_dict, *args, **kwargs):
 
 DATASET_PARSER_NAME = "nextqa"
 DATASET_HF_PATH = "lmms-lab/NExTQA"
-@AutoEvalPairDataset.register(DATASET_PARSER_NAME)
+@AutoPairDataset.register(DATASET_PARSER_NAME)
 def load_nextqa_dataset(model_args, data_args, *args, **kwargs):
     dataset = load_dataset(DATASET_HF_PATH, "MC", split="test")
     print(f"Loading {DATASET_HF_PATH}, {len(dataset)} samples")

@@ -1,7 +1,7 @@
 import os
 
 from ..dataset_hf_path import EVAL_DATASET_HF_PATH
-from ..eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, RESOLUTION_MAPPING, ImageVideoInstance
+from ..eval_dataset.base_eval_dataset import AutoPairDataset, add_metainfo_hook, RESOLUTION_MAPPING, ImageVideoInstance
 from ..utils.dataset_utils import load_hf_dataset, sample_dataset
 from ..utils.vision_utils import save_frames, process_video_frames
 from src.model.processor import process_input_text
@@ -45,7 +45,7 @@ def data_prepare(batch_dict, *args, **kwargs):
 
 DATASET_PARSER_NAME = "vatex"
 # 4,478 example since a lot of videos are not valid
-@AutoEvalPairDataset.register(DATASET_PARSER_NAME)
+@AutoPairDataset.register(DATASET_PARSER_NAME)
 def load_vatex_dataset(model_args, data_args, **kwargs):
     dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[kwargs['dataset_name']])
     dataset = sample_dataset(dataset, **kwargs)

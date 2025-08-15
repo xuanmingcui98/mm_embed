@@ -5,17 +5,13 @@ import sys
 
 from datasets import load_dataset
 
-from src.data.eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, MMEBV2EvalDatasetProcessor
-from src.data.utils.dataset_utils import sample_dataset
-from src.data.utils.vision_utils import temporal_random_crop, process_video_frames, load_frames, qa_template
+from src.data.eval_dataset.base_eval_dataset import MMEBV2EvalDatasetProcessor
+from src.data.utils.vision_utils import process_video_frames, load_frames
 from src.model.processor import VLM_VIDEO_TOKENS
 import random
 import cv2
-from ..prompts import (get_query, get_target, 
-                       IMAGE_TASKS, VIDEO_TASKS, VISDOC_TASKS,
-                       format_description, format_text_for_chat_template, 
-                       extract_query, extract_target)
-from src.model.processor import process_input_text
+from ..prompts import VIDEO_QA_INSTRUCTION, TEXT_EMBED_INSTRUCTION
+from ..loader.mixed_dataset import AutoPairDataset, add_metainfo_hook
                        
 
 def process_query(query, prompt, video_token=''):
@@ -26,40 +22,26 @@ def process_query(query, prompt, video_token=''):
     return query
 
 
-TASK_INST_QRY = "Given a video and a question, select the most accurate answer from the provided candidates. Return only the exact text of your chosen answer. Question: "
-TASK_INST_TGT = "Represent the following text:\n{query}"
+TASK_INST_QRY = "" # "Given a video and a question, select the most accurate answer from the provided candidates. Return only the exact text of your chosen answer. Question: "
+TASK_INST_TGT = "" # "Represent the following text:\n{query}"
 OPTIONS = ['yes', 'no']
 
 
 DATASET_PARSER_NAME = "activitynetqa"
 DATASET_HF_PATH = "lmms-lab/ActivityNetQA"
-@AutoEvalPairDataset.register(DATASET_PARSER_NAME)
+@AutoPairDataset.register(DATASET_PARSER_NAME)
+@AutoPairDataset.register_instruction("ActivityNetQA",
+    {'query': VIDEO_QA_INSTRUCTION,
+     'target': TEXT_EMBED_INSTRUCTION})
 class ActivityNetQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
-    def __init__(self,                 
-                 model_args, 
-                 data_args, 
-                 training_args, 
-                 processor, 
-                 **dataset_config):
+    def __init__(self, *args, **dataset_config):
 
-        super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, processor, 
+        super().__init__(DATASET_PARSER_NAME, *args, 
                         query_key_text="question", query_key_mm="video_name",
-                        cand_key_text=None, cand_key_mm=None,
-                         **dataset_config)
+                        cand_key_text=None, cand_key_mm=None, **dataset_config)
 
     def _load_hf_dataset(self):
         return load_dataset('json', data_files=self.dataset_config["data_path"])['train'], None
-
-    # def _add_signature_columns_map_func(self, batch_dict):
-    #     signature_columns = {
-
-    #         # @xuanming we assume modality in the order of text, image, video
-    #         # current assume two modalities max for query and target
-    #         "query_key_text": batch_dict['question'],
-    #         "query_key_mm": batch_dict['video_name'],
-    #         "cand_key_text": [''] * len(batch_dict['question']),
-    #         "cand_key_mm": [''] * len(batch_dict['question'])}
-    #     return batch_dict | signature_columns
 
     def _process_one_sample(self, idx, batch_dict, *args, **kwargs):
 
@@ -121,117 +103,3 @@ class ActivityNetQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "cand_image": cand_images,
             "dataset_infos": dataset_info,
             }
-        
-
-    # @add_metainfo_hook
-    # def batch_preprocess(self, batch_dict, *args, **kwargs):
-    #     model_backbone = kwargs['model_backbone']
-    #     max_frames_saved = kwargs['max_frames_saved']
-    #     video_root = kwargs['video_root']
-    #     frame_root = kwargs['frame_root']
-    #     num_frames = kwargs['num_frames']
-    #     query_texts, query_images, cand_texts, cand_images, dataset_infos = [], [], [], [], []
-
-    #     batch_size = len(next(iter(batch_dict.values())))
-    #     for video_name, query, answer, question_id, query_key_text, query_key_mm, cand_key_text, cand_key_mm in \
-    #             zip(batch_dict['video_name'], batch_dict['question'], batch_dict['answer'], batch_dict['question_id']):
-    #         orig_query = query
-    #         query = process_query(query + '? (A) yes; (B) no.', prompt=TASK_INST_QRY, video_token=VLM_VIDEO_TOKENS[model_backbone])
-            
-    #         video_path = f'{video_root}/v_{video_name}.mp4'
-    #         frame_dir = f'{frame_root}/v_{video_name}'
-    #         frames = load_frames(frame_dir)
-    #         if not frames:
-    #             # print(f'Extracting frames for: {video_path}')
-    #             os.makedirs(frame_dir, exist_ok=True)
-    #             assert os.path.exists(video_path)
-    #             cap = cv2.VideoCapture(video_path)
-    #             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    #             step = max(1, total_frames // max_frames_saved)
-    #             frame_idx = 0
-    #             saved_frames = 0
-    #             while saved_frames < max_frames_saved:
-    #                 assert cap.isOpened(), "not cap.isOpened()"
-    #                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)  # Move to specific frame
-    #                 ret, frame = cap.read()
-    #                 if not ret:
-    #                     break
-    #                 frame_path = os.path.join(frame_dir, f"{saved_frames:04d}.jpeg")
-    #                 cv2.imwrite(frame_path, frame)
-    #                 saved_frames += 1
-    #                 frame_idx += step
-    #             cap.release()
-    #             # print(f'[{DATASET_PARSER_NAME}] Extracted #frames: {saved_frames}, dumped to {frame_dir}')
-
-    #         qry_frame_paths = process_video_frames(frame_dir, num_frames=num_frames)
-
-    #         if self.apply_chat_template:
-    #             description = self.query_descriptions[(orig_query, video_name)] if self.query_descriptions is not None else None
-    #             query_texts.append([self.format_text_for_chat_template(is_query=True,
-    #                                                                    text=query, 
-    #                                                                    video_path=frame_dir, 
-    #                                                                    description=description, 
-    #                                                                    add_generation_prompt=self.model_args.do_sft_query,
-    #                                                                    key=())])
-    #             cand_texts.append([self.format_text_for_chat_template(is_query=False,
-    #                                                                   text=process_input_text(TASK_INST_TGT, model_backbone, text=text), 
-    #                                                                   add_generation_prompt=self.model_args.do_sft_target) for text in OPTIONS])
-                
-    #         else:
-    #             query_texts.append([query])
-    #             cand_texts.append(OPTIONS)
-
-    #         # print(f'[{DATASET_PARSER_NAME}] Loaded #frames: {len(qry_frame_paths)}, from {frame_dir}')
-    #         qry_frames = {"bytes": [None] * len(qry_frame_paths), "paths": qry_frame_paths, "resolutions": [None] * len(qry_frame_paths)}
-    #         query_images.append([qry_frames])
-    #         cand_images.append([None] * len(OPTIONS))
-    #         dataset_info = {
-    #             "question_id": question_id,
-    #             "video_id": video_name,
-    #             "query": query,
-    #             "cand_names": OPTIONS,
-    #             "answer": answer,
-    #             "label_name": answer,
-    #             "answer_idx": OPTIONS.index(answer),
-    #             "qry_frame_paths": qry_frame_paths,
-    #         }
-    #         dataset_infos.append(dataset_info)
-    #     if len(query_texts) == 0:
-    #         print('something went wrong')
-    #     # print_rank(f"dataset.map(): global_dataset_name={kwargs.get('global_dataset_name', DATASET_PARSER_NAME)}, batch_size={batch_size}, processed_batch_size={len(query_texts)}")
-    #     processed_batch = {"query_text": query_texts, "query_image": query_images,
-    #             "cand_text": cand_texts, "cand_image": cand_images,
-    #             "dataset_infos": dataset_infos}
-    #     return batch_dict | processed_batch
-
-def sub_sample(video_dir, video_export_dir):
-    dataset = load_dataset(DATASET_HF_PATH, split="test")
-    print(f"Loading {DATASET_HF_PATH}, {len(dataset)} samples")
-    yesno_count = 0
-    yesno_mp4_count = 0
-    row_idx = []
-    for row_id, row in enumerate(dataset):
-        if row['answer'] not in ['yes', 'no']:
-            print(row)
-        else:
-            yesno_count += 1
-            if not os.path.exists(video_dir + 'v_' + row['video_name'] + '.mp4'):
-                continue
-            yesno_mp4_count += 1
-            row_idx.append(row_id)
-        pass
-    print(f'yesno_count={yesno_count}')
-    print(f'yesno_mp4_count={yesno_mp4_count}')
-    yesno_dataset = dataset.select(row_idx)
-    random_ids = random.sample(range(len(yesno_dataset)), 1000)
-    random_ids = sorted(random_ids)
-    yesno_dataset = yesno_dataset.select(random_ids)
-    yesno_dataset.save_to_disk("data/ActivityNetQA/")
-    with open(f'data/activitynetqa.jsonl', 'w') as f:
-        for row in yesno_dataset:
-            f.write(f'{json.dumps(row)}\n')
-            video_path = video_dir + 'v_' + row['video_name'] + '.mp4'
-            video_export_path = f'{video_export_dir}/r_{row["video_name"]}.mp4'
-            shutil.copyfile(video_path, video_export_path)
-    print("Done")
-    exit()

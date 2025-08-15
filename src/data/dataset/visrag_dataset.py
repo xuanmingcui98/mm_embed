@@ -2,10 +2,10 @@ from datasets import load_dataset
 from PIL import Image
 from datasets.features.image import image_to_bytes
 from torch.jit import isinstance
-from ..dataset.base_pair_dataset import AutoPairDataset, add_metainfo_hook, MULTIMODAL_FEATURES, \
-    RESOLUTION_MAPPING, VideoDatasetProcessor
+from ..dataset.base_pair_dataset import RESOLUTION_MAPPING, VideoDatasetProcessor
+from ..loader.mixed_dataset import AutoPairDataset
 from src.model.processor import VLM_IMAGE_TOKENS
-
+from ..prompts import TEXT_EMBED_INSTRUCTION, VIDEO_EMBED_INSTRUCTION, VISDOC_QA_RETRIEVAL_INSTRUCTION, VISDOC_EMBED_INSTRUCTION
 
 def process_query(query, prompt, image_token=''):
     if prompt:
@@ -42,14 +42,16 @@ target_source2prompt = {
 TASK_INST_TGT = "Represent the following text:\n"
 DATASET_PARSER_NAME = "visrag"
 @AutoPairDataset.register(DATASET_PARSER_NAME)
+@AutoPairDataset.register_instruction("openbmb/VisRAG-Ret-Train-In-domain-data", 
+    {'query': VISDOC_QA_RETRIEVAL_INSTRUCTION,
+     'target': VISDOC_EMBED_INSTRUCTION})
 class VisragDatasetProcessor(VideoDatasetProcessor):
-    def __init__(self, model_args, data_args, training_args, **kwargs):
-        super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, 
+    def __init__(self, *args, **dataset_config):
+        super().__init__(DATASET_PARSER_NAME, *args, **dataset_config,
                          query_key_text="query",
                          query_key_mm=None,
                          cand_key_text="source",
-                         cand_key_mm="image",
-                         **kwargs)
+                         cand_key_mm="image")
 
     def _load_hf_dataset(self):
         dataset_name = self.dataset_config.get("dataset_name", DATASET_PARSER_NAME)
@@ -62,25 +64,15 @@ class VisragDatasetProcessor(VideoDatasetProcessor):
             dataset = load_dataset("parquet", data_files=dataset_path, split="train")
         return dataset
 
-        
-
-    # def _add_signature_columns_map_func(self, batch_dict):
-    #     signature_columns = {
-    #         "query_key_text": batch_dict['query'],
-    #         "query_key_mm": [''] * len(batch_dict['query']),
-    #         "cand_key_text": batch_dict['source'],
-    #         "cand_key_mm": batch_dict['image']}
-    #     return batch_dict | signature_columns
-    
     def _process_one_sample(self, idx, batch_dict, *args, **kwargs):
         model_backbone = kwargs['model_backbone']
         image_resolution = kwargs['image_resolution']
 
         query, image, source = batch_dict['query'][idx], batch_dict['image'][idx], batch_dict['source'][idx]
-        query = process_query(query, prompt=query_source2prompt.get(source, ""), image_token="")
-        pos_text = process_query('', prompt=target_source2prompt.get(source, ""), image_token=VLM_IMAGE_TOKENS[model_backbone])
-        if self.data_args.apply_chat_template:
-            pos_text = TASK_INST_TGT + pos_text
+        # query = process_query(query, prompt=query_source2prompt.get(source, ""), image_token="")
+        # pos_text = process_query('', prompt=target_source2prompt.get(source, ""), image_token=VLM_IMAGE_TOKENS[model_backbone])
+        query = process_query(query, prompt="", image_token="")
+        pos_text = process_query('', prompt="", image_token=VLM_IMAGE_TOKENS[model_backbone])
 
         if isinstance(image, Image.Image):
             # BC, datasets==2.21.0
@@ -94,77 +86,3 @@ class VisragDatasetProcessor(VideoDatasetProcessor):
         return {"query_text": query, "query_image": None,
                 "pos_text": pos_text, "pos_image": pos_image,
                 "neg_text": "", "neg_image": None}
-
-    # @add_metainfo_hook
-    # def batch_preprocess(self, batch_dict, *args, **kwargs):
-    #     model_backbone = kwargs['model_backbone']
-    #     image_resolution = kwargs['image_resolution']
-    #     batch_size = len(batch_dict['query'])
-    #     query_texts, query_images, pos_texts, pos_images, neg_texts, neg_images = [], [], [], [], [], []
-    #     for query, image, source in zip(batch_dict['query'], batch_dict['image'], batch_dict['source']):
-    #         # ignore prompt since most prompts too long
-    #         query = process_query(query, prompt=query_source2prompt.get(source, ""), image_token="")
-    #         pos_text = process_query('', prompt=target_source2prompt.get(source, ""), image_token=VLM_IMAGE_TOKENS[model_backbone])
-
-    #         if self.data_args.apply_chat_template:
-    #             query = self.format_text_for_chat_template(is_query=True, text=query, image_path=None, key=(query, ""))
-    #             pos_text = self.format_text_for_chat_template(is_query=False, text=pos_text, key=("", image))
-
-    #         query_texts.append(query)
-    #         pos_texts.append(pos_text)
-    #         neg_texts.append("")
-    #         if isinstance(image, Image.Image):
-    #             # BC, datasets==2.21.0
-    #             image_bytes = image_to_bytes(image)
-    #             path = ""
-    #         elif type(image) is dict:
-    #             # datasets==3.3.2
-    #             image_bytes = image['bytes']
-    #             path = image['path']
-    #         else:
-    #             raise ValueError(f"Unsupported image type: {type(image)}")
-    #         query_images.append(None)
-    #         pos_images.append({"bytes": [image_bytes], "paths": [path], "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]})
-    #         neg_images.append(None)
-    #     if len(query_texts) == 0:
-    #         print('something went wrong')
-    #     # print_rank(f"global_dataset_name={kwargs.get('global_dataset_name', DATASET_PARSER_NAME)}, batch_size={batch_size}, processed_batch_size={len(query_texts)}")
-    #     return {"query_text": query_texts, "query_image": query_images,
-    #             "pos_text": pos_texts, "pos_image": pos_images,
-    #             "neg_text": neg_texts, "neg_image": neg_images}
-
-
-
-# def load_visreg_dataset(model_args, data_args, training_args, *args, **kwargs):
-#     dataset_name = kwargs.get("dataset_name", DATASET_PARSER_NAME)
-#     dataset_split = kwargs.get("dataset_split", "train")
-#     global_dataset_name = kwargs.get("global_dataset_name", f'{DATASET_PARSER_NAME}/{dataset_name}')
-#     dataset_path = kwargs.get("dataset_path", None)
-
-#     if dataset_path:
-#         dataset = load_dataset("parquet", data_files=dataset_path, split="train")
-#     elif dataset_name:
-#         dataset = load_dataset(dataset_name, split=dataset_split)
-
-
-#     num_sample_per_subset = kwargs.get("num_sample_per_subset", getattr(data_args, "num_sample_per_subset", None))
-#     if num_sample_per_subset is not None and num_sample_per_subset < dataset.num_rows:
-#         num_rows = int(num_sample_per_subset)
-#         dataset = dataset.select(range(num_rows))
-#     num_rows = dataset.num_rows
-
-#     num_shards = training_args.dataloader_num_workers if training_args.dataloader_num_workers > 0 else 1
-#     dataset = dataset.to_iterable_dataset(num_shards=num_shards)  # convert to IterableDataset and multiple shards
-
-#     kwargs['model_backbone'] = model_args.model_backbone
-#     kwargs['image_resolution'] = data_args.image_resolution
-#     kwargs['global_dataset_name'] = global_dataset_name
-#     # dataset = dataset.shuffle(buffer_size=8192, seed=training_args.seed)
-#     dataset = dataset.map(lambda x: data_prepare(x, **kwargs), batched=True, batch_size=128,
-#                           remove_columns=['image'],
-#                           # remove_columns=['query', 'image', 'source'],
-#                           drop_last_batch = True)
-#     dataset = dataset.cast(MULTIMODAL_FEATURES)
-#     setattr(dataset, 'num_rows', num_rows)
-#     # print_master(f"Loaded {DATASET_PARSER_NAME}/{dataset_name} dataset with {num_rows} samples")
-#     return dataset

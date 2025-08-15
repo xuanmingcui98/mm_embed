@@ -1,10 +1,7 @@
 from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-from abc import ABCMeta, abstractmethod
-from collections import defaultdict
-from typing import Union, List, Dict, Any
-from functools import wraps
+
 from datasets import Features, Value, Sequence, IterableDataset
 import pickle, os
 from datasets import load_dataset, concatenate_datasets
@@ -19,6 +16,7 @@ from ..utils.dataset_utils import sample_dataset
 from ..utils.vision_utils import save_frames, load_frames, sample_frames
 from ...model.processor import process_input_text
 import torch
+from ..loader.mixed_dataset import add_metainfo_hook
 
 DATASET_INSTRUCTION = {
     'Kinetics-700': 'Recognize the category of the video content.',
@@ -69,83 +67,7 @@ RESOLUTION_MAPPING = {
 }
 
 
-class AutoPairDataset(metaclass=ABCMeta):
-    # Base class for auto datasets.
-    registry = {}
-    instruction_registry = defaultdict(None)
 
-    def __init_subclass__(cls):
-        if cls.__name__ not in AutoPairDataset.registry:
-            AutoPairDataset.registry[cls.__name__] = cls
-        else:
-            raise RuntimeError('Subclass "{cls.__name__}" has already defined.')
-
-    def __init__(self, *args, **kwargs):
-        raise EnvironmentError(
-            f"{self.__class__.__name__} is designed to be instantiated "
-            f"using the `{self.__class__.__name__}.from_pretrained(pretrained_model_name_or_path)` or "
-            f"`{self.__class__.__name__}.from_config(config)` methods."
-        )
-
-    @classmethod
-    def instantiate(cls, dataset_parser, *args, **kwargs):
-        try:
-            if kwargs.get("dataset_name") is not None:
-                instruction = cls.instruction_registry[kwargs["dataset_name"]]
-            else:
-                instruction = cls.instruction_registry[dataset_parser]
-            return cls.registry[dataset_parser](*args, **kwargs, instruction=instruction).load()
-        except Exception as e:
-            raise e
-
-    @classmethod
-    def register(cls, dataset_name):
-        def inner_wrapper(wrapped_class):
-            if dataset_name in cls.registry:
-                print(f"[Alert] AutoPairDataset: a class in the same name ({dataset_name}) has been registered")
-            else:
-                cls.registry[dataset_name] = wrapped_class
-            return wrapped_class
-        return inner_wrapper
-
-    @classmethod
-    def register_instruction(cls, dataset_name: Union[str, List[str]], instruction):
-        """
-        Register the instruction for the dataset.
-        """
-        if isinstance(dataset_name, str):
-            dataset_name = [dataset_name]
-        for name in dataset_name:
-            if name in cls.instruction_registry:
-                print(f"[Alert] AutoPairDataset: a instruction in the same name ({name}) has been registered")
-            else:
-                cls.instruction_registry[name] = instruction
-
-    @abstractmethod
-    def main(self):
-        pass
-
-def add_metainfo_hook(f):
-    """
-    A post-processing wrapper function that add meta information (e.g. data_type, dataset_name, loss_type) into batches
-    """
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        # go through data pipeline customized to each dataset
-        batch_data = f(*args, **kwargs)
-        if isinstance(batch_data['query_text'], str) or batch_data['query_text'] is None:
-            # if the batch_data is a single sample
-            batch_data['global_dataset_name'] = kwargs.get("global_dataset_name", "None")
-            batch_data['task_id'] = [TASK2ID[kwargs['dataset_name']]]
-            return batch_data
-        # append common metadata
-        batch_size = len(batch_data['query_text'])
-        global_dataset_name = kwargs.get("global_dataset_name", "None")
-        batch_data['global_dataset_name'] = [global_dataset_name] * batch_size
-        batch_data['task_id'] = [TASK2ID[kwargs['dataset_name']]] * batch_size
-        return batch_data
-
-    return wrapper
 
 class BaseDatasetProcessor:
     def __init__(self,
@@ -260,9 +182,6 @@ class BaseDatasetProcessor:
 
             num_rows *= 2
             
-        # self.dataset = self.dataset.add_column("global_dataset_name", [self.dataset_config.get("global_dataset_name", self.data_parser_name)] * num_rows)
-        # self.dataset = self.dataset.add_column("task_id", [TASK2ID[self.dataset_name]] * num_rows)
-
         print_master(f"Loaded {self.data_parser_name}/{self.dataset_name} dataset with {num_rows} samples")
         
         if not self.data_args.debug_prompt and isinstance(self.dataset, IterableDataset):
@@ -287,32 +206,6 @@ class BaseDatasetProcessor:
             May be implemented by subclasses.
         """
         raise NotImplementedError("This method should be implemented by subclasses.")
-
-    # def _add_signature_columns_map_func(self, batch_dict):
-
-    #     """
-    #         Expect to return 
-    #             {"query_text": query, "query_image": query_image,
-    #              "pos_text": pos_text, "pos_image": pos_image,
-    #              "neg_text": neg_text, "neg_image": neg_image}
-        
-    #     """
-        
-    #     raise NotImplementedError(
-    #         f"{self.__class__.__name__} does not implement `_add_signature_columns_map_func` method. "
-    #         "Please implement it in the subclass."
-    #     )
-
-    # def add_signature_columns(self):
-
-    #     self.dataset = self.dataset.map(
-    #         self._add_signature_columns_map_func,
-    #         batched=True,
-    #         batch_size=2048,
-    #         # num_proc=12,
-    #         drop_last_batch=False,
-    #         load_from_cache_file=False
-    #     )
     
     def format_text_for_chat_template(self, is_query, text, image_path=None, video_path=None, key=None, add_generation_prompt=False):
 
@@ -332,8 +225,6 @@ class BaseDatasetProcessor:
         # make sure no extra visual tokens are left in the text
         text = text.replace(VLM_IMAGE_TOKENS[self.model_backbone], "")
         text = text.replace(VLM_VIDEO_TOKENS[self.model_backbone], "").strip()
-
-        desc = self.query_descriptions if is_query else self.target_descriptions
 
         description = format_description(desc[key], self.data_args.use_cot) if (desc is not None and key is not None) else ""
 

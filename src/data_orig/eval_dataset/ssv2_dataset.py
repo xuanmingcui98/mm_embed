@@ -2,7 +2,7 @@ import os
 
 from datasets import Dataset
 from ..dataset_hf_path import EVAL_DATASET_HF_PATH
-from ..eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, RESOLUTION_MAPPING, ImageVideoInstance
+from ..eval_dataset.base_eval_dataset import AutoPairDataset, add_metainfo_hook, RESOLUTION_MAPPING, ImageVideoInstance
 from ..utils.dataset_utils import load_hf_dataset, sample_dataset
 from ..eval_dataset.video_classification_utils import VIDEOCLS_LABEL_MAPPING, DATASET_INSTRUCTION
 from ..utils.vision_utils import save_frames, process_video_frames
@@ -47,7 +47,7 @@ def data_prepare(batch_dict, **kwargs):
 
 
 DATASET_PARSER_NAME = "ssv2"
-@AutoEvalPairDataset.register(DATASET_PARSER_NAME)
+@AutoPairDataset.register(DATASET_PARSER_NAME)
 def load_ssv2_dataset(model_args, data_args, **kwargs):
     """
     ssv2-mc setup for zero-shot evaluation.

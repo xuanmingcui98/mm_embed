@@ -4,7 +4,7 @@ import os, ast
 
 from torch.jit import isinstance
 from src.data.dataset.gui_dataset import DATASET_PARSER_NAME
-from src.data.eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, \
+from src.data.eval_dataset.base_eval_dataset import \
     RESOLUTION_MAPPING, MMEBV2EvalDatasetProcessor
 from src.model.processor import PHI3V, VLM_IMAGE_TOKENS
 from ..prompts import (get_query, get_target, 
@@ -30,16 +30,11 @@ def process_multi_images(image_basedir, image_paths) -> List[str]:
     return img_path_list
 
 # not used currently
-@AutoEvalPairDataset.register(DATASET_PARSER_NAME)
+@AutoPairDataset.register(DATASET_PARSER_NAME)
 class GuiEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
-    def __init__(self,                 
-                 model_args, 
-                 data_args, 
-                 training_args, 
-                 processor, 
-                 **dataset_config):
+    def __init__(self, *args,**dataset_config):
 
-        super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, processor, 
+        super().__init__(DATASET_PARSER_NAME, *args,
                         #  query_key_text="qry_text"
                          **dataset_config)
 

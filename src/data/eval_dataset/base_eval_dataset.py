@@ -10,7 +10,7 @@ from src.utils import print_master, print_rank
 # from torch.utils.data import Dataset
 from ..prompts import (get_query, get_target, 
                        IMAGE_TASKS, VIDEO_TASKS, VISDOC_TASKS,
-                       format_description, format_text_for_chat_template, 
+                       format_description, 
                        extract_query, extract_target)
 import torch
 from ...model.processor import process_input_text
@@ -18,7 +18,7 @@ from ..utils.dataset_utils import load_hf_dataset, sample_dataset
 from ..dataset_hf_path import EVAL_DATASET_HF_PATH
 from ...model.processor import VLM_VIDEO_TOKENS
 from .video_classification_utils import VIDEOCLS_LABEL_MAPPING, DATASET_INSTRUCTION
-from src.data.utils.vision_utils import save_frames, process_video_frames
+from ..loader.mixed_dataset import add_metainfo_hook
 
 
 # Schema for evaluation dataset, not used in the code.
@@ -77,67 +77,6 @@ class ImageVideoInstance:
             "paths": self.paths,
             "resolutions": self.resolutions,
         }
-
-
-class AutoEvalPairDataset(metaclass=ABCMeta):
-    # Base class for auto datasets.
-    registry = {}
-    instruction_registry = {}
-
-    def __init_subclass__(cls):
-        if cls.__name__ not in AutoEvalPairDataset.registry:
-            AutoEvalPairDataset.registry[cls.__name__] = cls
-        else:
-            raise RuntimeError('Subclass "{cls.__name__}" has already defined.')
-
-    def __init__(self, *args, **kwargs):
-        raise EnvironmentError(
-            f"{self.__class__.__name__} is designed to be instantiated "
-            f"using the `{self.__class__.__name__}.from_pretrained(pretrained_model_name_or_path)` or "
-            f"`{self.__class__.__name__}.from_config(config)` methods."
-        )
-
-    @classmethod
-    def instantiate(cls, dataset_parser, *args, **kwargs):
-        try:
-            return cls.registry[dataset_parser](*args, **kwargs).load()
-        except Exception as e:
-            raise e
-
-    @classmethod
-    def register(cls, dataset_name, instruction: dict = None):
-        # instruction should be a dict with keys: "query", "target"
-        def inner_wrapper(wrapped_class):
-            if dataset_name in cls.registry:
-                print(f"[Alert] AutoPairDataset: a class in the same name ({dataset_name}) has been registered")
-            else:
-                # print(f"Adding {dataset_name}")
-                cls.registry[dataset_name] = wrapped_class
-                cls.instruction_registry[dataset_name] = instruction
-            return wrapped_class
-        return inner_wrapper
-
-    @abstractmethod
-    def main(self):
-        pass
-
-
-def add_metainfo_hook(f):
-    """
-    A post-processing wrapper function that add meta information (e.g. data_type, dataset_name, loss_type) into batches
-    """
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        # go through data pipeline customized to each dataset
-        batch_data = f(*args, **kwargs)
-        # append common metadata
-        batch_size = len(batch_data.get('query_text', batch_data.get('cand_text', [])))
-        global_dataset_name = kwargs.get("global_dataset_name", "None")
-        batch_data['global_dataset_name'] = [global_dataset_name] * batch_size
-        return batch_data
-
-    return wrapper
-
 
 def generate_cand_dataset(dataset, corpus):
     """
@@ -319,11 +258,24 @@ class BaseEvalDatasetProcessor:
         cand_dataset = Dataset.from_list(cand_rows)
         return cand_dataset
 
-    def format_text_for_chat_template(self, is_query, text, image_path=None, video_path=None, add_generation_prompt=False, key=None):
+    def format_text_for_chat_template(self, is_query, text=None, image_path=None, video_path=None, add_generation_prompt=False, key=None):
 
-        text = text.replace(VLM_VIDEO_TOKENS[self.dataset_config["model_backbone"]], "").replace(VLM_IMAGE_TOKENS[self.dataset_config["model_backbone"]], "")
+        if is_query:
+            extract_fn = extract_query
+            desc = self.query_descriptions
+            instruction = self.instruction['query'] if self.instruction is not None else None
+        else:
+            extract_fn = extract_target
+            desc = self.target_descriptions
+            instruction = self.instruction['target'] if self.instruction is not None else None
 
-        desc = self.query_descriptions if is_query else self.target_descriptions
+        text = extract_fn(text, self.dataset_name)
+        if instruction is not None:
+            text = instruction.format(text=text)
+
+        # make sure no extra visual tokens are left in the text
+        text = text.replace(VLM_IMAGE_TOKENS[self.model_backbone], "")
+        text = text.replace(VLM_VIDEO_TOKENS[self.model_backbone], "").strip()
 
         description = format_description(desc[key], self.data_args.use_cot) if (desc is not None and key is not None) else ""
 
@@ -368,47 +320,26 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
                         query_key_text=query_key_text, query_key_mm=query_key_mm,
                         cand_key_text=cand_key_text, cand_key_mm=cand_key_mm, 
                         **kwargs)
+        
         self.data_parser_name = "mmeb_eval"
         self.subset_name = self.dataset_config.get("dataset_name")
         self.dataset_split = self.dataset_config.get("dataset_split", "test")
 
-        # for MMEB v2, the query text doesn't include instructions, so we need to take the instruction part out from the description
-        if self.query_descriptions is not None:
-            self.query_descriptions = {
-                (extract_query(qry_text, self.subset_name), qry_image_path): desc \
-                for (qry_text, qry_image_path), desc in self.query_descriptions.items()
-            }
-        if self.target_descriptions is not None:
-            self.target_descriptions = {
-                (extract_target(tgt_text, self.subset_name), tgt_image_path): desc \
-                for (tgt_text, tgt_image_path), desc in self.target_descriptions.items()
-            }
+        # # for MMEB v2, the query text doesn't include instructions, so we need to take the instruction part out from the description
+        # if self.query_descriptions is not None:
+        #     self.query_descriptions = {
+        #         (extract_query(qry_text, self.subset_name), qry_image_path): desc \
+        #         for (qry_text, qry_image_path), desc in self.query_descriptions.items()
+        #     }
+        # if self.target_descriptions is not None:
+        #     self.target_descriptions = {
+        #         (extract_target(tgt_text, self.subset_name), tgt_image_path): desc \
+        #         for (tgt_text, tgt_image_path), desc in self.target_descriptions.items()
+        #     }
 
         """
             Precompute targets to avoid repetitive processing 1000x for each sample.
         """
-
-    # def prepare_targets(self):
-    #     unique_pairs = set()
-    #     for row in self.dataset:
-    #         assert len(row["cand_key_text"]) == len(row["cand_key_mm"])
-    #         for cand_text, cand_image in zip(row["cand_key_text"], row["cand_key_mm"]):
-    #             unique_pairs.add((cand_text, cand_image))
-
-    #     preprocessed_pairs = {}
-
-    #     for cand_text, cand_image in unique_pairs:
-
-    #         description = None
-    #         if self.target_descriptions is not None:
-    #             description = format_description(self.target_descriptions[(cand_text, cand_image)], self.data_args.use_cot)
-
-    #         cand_text_processed = get_target(self.subset_name, cand_text, self.data_args.use_cot)
-    #         cand_text_processed = self.format_text_for_chat_template(cand_text_processed, cand_image, description=description, add_generation_prompt=self.model_args.do_sft_target)
-            
-    #         preprocessed_pairs[(cand_text, cand_image)] = cand_text_processed
-        
-    #     return preprocessed_pairs
 
     def _load_hf_dataset(self):
                 # dataset and corpus, if available
@@ -422,17 +353,6 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
         repo_subset_split = EVAL_DATASET_HF_PATH[dataset_path_key]
         self.repo_subset_split = repo_subset_split
         return load_hf_dataset(self.repo_subset_split, subset_name=load_subset_name), None
-
-    # def _add_signature_columns_map_func(self, batch_dict):
-    #     signature_columns = {
-
-    #         # @xuanming we assume modality in the order of text, image, video
-    #         # current assume two modalities max for query and target
-    #         "query_key_text": batch_dict['qry_text'],
-    #         "query_key_mm": batch_dict['qry_img_path'],
-    #         "cand_key_text": batch_dict['tgt_text'],
-    #         "cand_key_mm": batch_dict['tgt_img_path']}
-    #     return batch_dict | signature_columns
 
     @add_metainfo_hook
     def batch_preprocess(self, batch_dict, **kwargs):

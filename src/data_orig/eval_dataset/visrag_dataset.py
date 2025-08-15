@@ -2,7 +2,7 @@ import os
 import hashlib
 
 from ..dataset_hf_path import EVAL_DATASET_HF_PATH
-from ..eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook, RESOLUTION_MAPPING, ImageVideoInstance
+from ..eval_dataset.base_eval_dataset import AutoPairDataset, add_metainfo_hook, RESOLUTION_MAPPING, ImageVideoInstance
 from ..utils.dataset_utils import load_hf_dataset, sample_dataset, load_qrels_mapping
 from src.model.processor import process_input_text
 
@@ -84,7 +84,7 @@ def corpus_prepare(batch_dict, *args, **kwargs):
 
 
 DATASET_PARSER_NAME = "visrag"
-@AutoEvalPairDataset.register(DATASET_PARSER_NAME)
+@AutoPairDataset.register(DATASET_PARSER_NAME)
 def load_visrag_dataset(model_args, data_args, **kwargs):
     hf_dataset_name = EVAL_DATASET_HF_PATH[kwargs['dataset_name']][0]
     hf_dataset_split = EVAL_DATASET_HF_PATH[kwargs['dataset_name']][2]

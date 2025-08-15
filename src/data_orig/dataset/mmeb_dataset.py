@@ -104,7 +104,7 @@
 
 # DATASET_PARSER_NAME = "mmeb"
 # @AutoPairDataset.register(DATASET_PARSER_NAME)
-# def load_mmeb_dataset(model_args, data_args, training_args, processor, *args, **kwargs):
+# def load_mmeb_dataset(*args,*args, **kwargs):
 #     dataset_name = kwargs.get("dataset_name", DATASET_PARSER_NAME)
 #     subset_name = kwargs.get("subset_name")
 #     dataset_split = kwargs.get("dataset_split", "original")

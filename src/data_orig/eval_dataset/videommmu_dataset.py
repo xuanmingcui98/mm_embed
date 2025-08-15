@@ -3,7 +3,7 @@ import sys
 
 from datasets import load_dataset
 
-from ..eval_dataset.base_eval_dataset import AutoEvalPairDataset, add_metainfo_hook
+from ..eval_dataset.base_eval_dataset import AutoPairDataset, add_metainfo_hook
 from ..utils.dataset_utils import sample_dataset
 from ..utils.vision_utils import temporal_random_crop, process_video_frames, load_frames, qa_template
 from src.model.processor import VLM_VIDEO_TOKENS
@@ -90,7 +90,7 @@ subset_names = ['Perception', 'Comprehension', 'Adaptation']
 
 DATASET_PARSER_NAME = "videommmu"
 DATASET_HF_PATH = "lmms-lab/VideoMMMU"
-@AutoEvalPairDataset.register(DATASET_PARSER_NAME)
+@AutoPairDataset.register(DATASET_PARSER_NAME)
 def load_videommmu_dataset(model_args, data_args, training_args, *args, **kwargs):
     subsets = []
     for subset_name in subset_names:
