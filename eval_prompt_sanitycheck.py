@@ -21,7 +21,7 @@ from datasets.distributed import split_dataset_by_node
 
 from src.arguments import ModelArguments, DataArguments, TrainingArguments
 from src.data.collator.eval_collator import MultimodalEvalDataCollator
-from src.data.eval_dataset.base_eval_dataset import AutoPairDataset, generate_cand_dataset
+from src.data.eval_dataset.base_eval_dataset import AutoPairEvalDataset, generate_cand_dataset
 from src.eval_utils.metrics import RankingMetrics
 from src.model.model import MMEBModel
 from src.model.processor import get_backbone_name, load_processor, COLPALI
@@ -142,7 +142,7 @@ def main():
                     if data_args.data_basedir and task_config.get(key):
                         task_config[key] = os.path.join(data_args.data_basedir, task_config[key])
 
-            full_eval_qry_dataset, full_eval_cand_dataset = AutoPairDataset.instantiate(model_args=model_args, data_args=data_args, training_args=training_args, processor=processor, **task_config)
+            full_eval_qry_dataset, full_eval_cand_dataset = AutoPairEvalDataset.instantiate(model_args=model_args, data_args=data_args, training_args=training_args, processor=processor, **task_config)
 
             eval_qry_dataset, eval_cand_dataset = full_eval_qry_dataset, full_eval_cand_dataset
             # Pad datasets to be divisible by world_size before splitting

@@ -11,7 +11,7 @@ from src.model.processor import VLM_VIDEO_TOKENS
 import random
 import cv2
 from ..prompts import VIDEO_QA_INSTRUCTION, TEXT_EMBED_INSTRUCTION
-from ..loader.mixed_dataset import AutoPairDataset, add_metainfo_hook
+from ..loader.mixed_dataset import AutoPairEvalDataset
                        
 
 def process_query(query, prompt, video_token=''):
@@ -29,8 +29,8 @@ OPTIONS = ['yes', 'no']
 
 DATASET_PARSER_NAME = "activitynetqa"
 DATASET_HF_PATH = "lmms-lab/ActivityNetQA"
-@AutoPairDataset.register(DATASET_PARSER_NAME)
-@AutoPairDataset.register_instruction("ActivityNetQA",
+@AutoPairEvalDataset.register(DATASET_PARSER_NAME)
+@AutoPairEvalDataset.register_instruction("ActivityNetQA",
     {'query': VIDEO_QA_INSTRUCTION,
      'target': TEXT_EMBED_INSTRUCTION})
 class ActivityNetQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):

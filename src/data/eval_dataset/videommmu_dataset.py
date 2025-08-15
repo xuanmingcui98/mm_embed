@@ -6,7 +6,7 @@ from src.data.utils.vision_utils import process_video_frames, load_frames, qa_te
 from src.model.processor import VLM_VIDEO_TOKENS
 import datasets
 from ..prompts import TEXT_EMBED_INSTRUCTION, VIDEO_QA_INSTRUCTION
-from ..loader.mixed_dataset import AutoPairDataset
+from ..loader.mixed_dataset import AutoPairEvalDataset
 
 def process_query(query, prompt, video_token=''):
     if prompt:
@@ -26,8 +26,8 @@ subset_names = ['Perception', 'Comprehension', 'Adaptation']
 
 DATASET_PARSER_NAME = "videommmu"
 DATASET_HF_PATH = "lmms-lab/VideoMMMU"
-@AutoPairDataset.register(DATASET_PARSER_NAME)
-@AutoPairDataset.register_instruction("VideoMMMU",
+@AutoPairEvalDataset.register(DATASET_PARSER_NAME)
+@AutoPairEvalDataset.register_instruction("VideoMMMU",
     {'query': VIDEO_QA_INSTRUCTION,
      'target': TEXT_EMBED_INSTRUCTION})
 class VideoMMMUEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):

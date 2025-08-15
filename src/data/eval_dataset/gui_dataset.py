@@ -30,7 +30,7 @@ def process_multi_images(image_basedir, image_paths) -> List[str]:
     return img_path_list
 
 # not used currently
-@AutoPairDataset.register(DATASET_PARSER_NAME)
+@AutoPairEvalDataset.register(DATASET_PARSER_NAME)
 class GuiEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self, *args,**dataset_config):
 

@@ -6,7 +6,7 @@ from src.data.utils.dataset_utils import load_hf_dataset
 from src.data.utils.vision_utils import save_frames, process_video_frames
 from src.model.processor import process_input_text
 from ..prompts import TEXT_EMBED_INSTRUCTION, VIDEO_EMBED_INSTRUCTION
-from ..loader.mixed_dataset import AutoPairDataset
+from ..loader.mixed_dataset import AutoPairEvalDataset
 
 
 # TASK_INST_QRY = "Find the video snippet that corresponds to the given summary:"
@@ -15,8 +15,8 @@ TASK_INST_QRY = ""
 TASK_INST_TGT = ""
 
 DATASET_PARSER_NAME = "msvd"
-@AutoPairDataset.register(DATASET_PARSER_NAME)
-@AutoPairDataset.register_instruction("MSVD",
+@AutoPairEvalDataset.register(DATASET_PARSER_NAME)
+@AutoPairEvalDataset.register_instruction("MSVD",
     {'query': TEXT_EMBED_INSTRUCTION,
      'target': VIDEO_EMBED_INSTRUCTION})
 class MSVDEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):

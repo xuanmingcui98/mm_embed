@@ -12,7 +12,7 @@ from src.data.eval_dataset.base_eval_dataset import MMEBV2EvalDatasetProcessor
 from src.data.utils.vision_utils import process_video_frames, qa_template
 from src.model.processor import VLM_VIDEO_TOKENS
 from ..prompts import TEXT_EMBED_INSTRUCTION, VIDEO_QA_INSTRUCTION
-from ..loader.mixed_dataset import AutoPairDataset
+from ..loader.mixed_dataset import AutoPairEvalDataset
 
 def process_query(query, prompt, video_token=''):
     if prompt:
@@ -105,8 +105,8 @@ TASK_INST_TGT = ""
 
 DATASET_PARSER_NAME = "mvbench"
 DATASET_HF_PATH = "OpenGVLab/MVBench"
-@AutoPairDataset.register(DATASET_PARSER_NAME)
-@AutoPairDataset.register_instruction("MVBench",
+@AutoPairEvalDataset.register(DATASET_PARSER_NAME)
+@AutoPairEvalDataset.register_instruction("MVBench",
     {'query': VIDEO_QA_INSTRUCTION,
      'target': TEXT_EMBED_INSTRUCTION})
 class MVBenchEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):

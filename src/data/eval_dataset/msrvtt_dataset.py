@@ -6,7 +6,7 @@ from src.data.utils.dataset_utils import load_hf_dataset, sample_dataset
 from src.data.utils.vision_utils import save_frames, process_video_frames
 from src.model.processor import process_input_text
 from ..prompts import TEXT_EMBED_INSTRUCTION, VIDEO_EMBED_INSTRUCTION
-from ..loader.mixed_dataset import AutoPairDataset
+from ..loader.mixed_dataset import AutoPairEvalDataset
 
 # TASK_INST_QRY = "Find a video that contains the following visual content:"
 # TASK_INST_TGT = "Understand the content of the provided video."
@@ -14,8 +14,8 @@ TASK_INST_QRY = ""
 TASK_INST_TGT = ""
 
 DATASET_PARSER_NAME = "msrvtt"
-@AutoPairDataset.register(DATASET_PARSER_NAME)
-@AutoPairDataset.register_instruction("MSR-VTT",
+@AutoPairEvalDataset.register(DATASET_PARSER_NAME)
+@AutoPairEvalDataset.register_instruction("MSR-VTT",
     {'query': TEXT_EMBED_INSTRUCTION,
      'target': VIDEO_EMBED_INSTRUCTION})
 class MSRVTTEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):

@@ -8,7 +8,7 @@ from src.data.utils.vision_utils import process_video_frames, load_frames
 from src.model.processor import VLM_VIDEO_TOKENS
 import cv2
 from ..prompts import (TEXT_EMBED_INSTRUCTION, VIDEO_QA_INSTRUCTION)
-from ..loader.mixed_dataset import AutoPairDataset
+from ..loader.mixed_dataset import AutoPairEvalDataset
 
 def process_query(query, prompt, video_token=''):
     if prompt:
@@ -23,8 +23,8 @@ OPTIONS = ['A', 'B', 'C', 'D']
 
 DATASET_PARSER_NAME = "egoschema"
 DATASET_HF_PATH = "lmms-lab/egoschema"
-@AutoPairDataset.register(DATASET_PARSER_NAME)
-@AutoPairDataset.register_instruction("EgoSchema",
+@AutoPairEvalDataset.register(DATASET_PARSER_NAME)
+@AutoPairEvalDataset.register_instruction("EgoSchema",
     {'query': VIDEO_QA_INSTRUCTION,
      'target': TEXT_EMBED_INSTRUCTION})
 class EgoSchemaEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):

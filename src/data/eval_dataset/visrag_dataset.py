@@ -5,7 +5,7 @@ from src.data.dataset_hf_path import EVAL_DATASET_HF_PATH
 from src.data.eval_dataset.base_eval_dataset import RESOLUTION_MAPPING, ImageVideoInstance, MMEBV2EvalDatasetProcessor
 from src.data.utils.dataset_utils import load_hf_dataset, sample_dataset, load_qrels_mapping
 from src.model.processor import process_input_text
-from ..loader.mixed_dataset import AutoPairDataset
+from ..loader.mixed_dataset import AutoPairEvalDataset
 from ..prompts import VISDOC_QA_RETRIEVAL_INSTRUCTION, VISDOC_EMBED_INSTRUCTION
 
 
@@ -23,8 +23,8 @@ VISRAG_DATASETS = [
 ]
 
 DATASET_PARSER_NAME = "visrag"
-@AutoPairDataset.register(DATASET_PARSER_NAME)
-@AutoPairDataset.register_instruction(VISRAG_DATASETS,
+@AutoPairEvalDataset.register(DATASET_PARSER_NAME)
+@AutoPairEvalDataset.register_instruction(VISRAG_DATASETS,
     {'query': VISDOC_QA_RETRIEVAL_INSTRUCTION,
      'target': VISDOC_EMBED_INSTRUCTION})
 class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):

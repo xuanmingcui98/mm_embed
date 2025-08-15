@@ -5,7 +5,7 @@ from src.data.eval_dataset.base_eval_dataset import RESOLUTION_MAPPING, MMEBV2Ev
 from src.data.utils.dataset_utils import load_hf_dataset
 from src.data.utils.vision_utils import save_frames, process_video_frames
 from src.model.processor import process_input_text
-from ..loader.mixed_dataset import AutoPairDataset
+from ..loader.mixed_dataset import AutoPairEvalDataset
 from ..prompts import VIDEO_EMBED_INSTRUCTION, TEXT_EMBED_INSTRUCTION
 
 
@@ -17,8 +17,8 @@ TASK_INST_TGT = ""
 
 DATASET_PARSER_NAME = "youcook2"
 # slightly less than the official one: https://github.com/antoine77340/MIL-NCE_HowTo100M/blob/master/csv/validation_youcook.csv?plain=1
-@AutoPairDataset.register(DATASET_PARSER_NAME)
-@AutoPairDataset.register_instruction("YouCook2",
+@AutoPairEvalDataset.register(DATASET_PARSER_NAME)
+@AutoPairEvalDataset.register_instruction("YouCook2",
     {'query': TEXT_EMBED_INSTRUCTION,
      'target': VIDEO_EMBED_INSTRUCTION})
 class YouCook2EvalDatasetProcessor(MMEBV2EvalDatasetProcessor):

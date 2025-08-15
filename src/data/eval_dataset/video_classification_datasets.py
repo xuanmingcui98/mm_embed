@@ -8,7 +8,7 @@ from src.data.eval_dataset.video_classification_utils import VIDEOCLS_LABEL_MAPP
 from src.data.utils.vision_utils import save_frames, process_video_frames
 from src.model.processor import process_input_text
 from ..prompts import TEXT_EMBED_INSTRUCTION
-from ..loader.mixed_dataset import AutoPairDataset
+from ..loader.mixed_dataset import AutoPairEvalDataset
 
 
 TASK_INST_TGT = "" # "Represent the following text:\n"
@@ -21,17 +21,17 @@ DATASET_INSTRUCTION = {
 }
 
 DATASET_PARSER_NAME = "video_classification"
-@AutoPairDataset.register(DATASET_PARSER_NAME)
-@AutoPairDataset.register_instruction("HMDB51",
+@AutoPairEvalDataset.register(DATASET_PARSER_NAME)
+@AutoPairEvalDataset.register_instruction("HMDB51",
     {'query': """Given the video, identify the actions or object interactions being performed by the person. Embed the video with your answer.""",
      'target': TEXT_EMBED_INSTRUCTION})
-@AutoPairDataset.register_instruction("UCF101",
+@AutoPairEvalDataset.register_instruction("UCF101",
     {'query': """Given the video, identify the activities or sports being performed by the person. Embed the video with your answer.""",
      'target': TEXT_EMBED_INSTRUCTION})
-@AutoPairDataset.register_instruction("Kinetics-700",
+@AutoPairEvalDataset.register_instruction("Kinetics-700",
     {'query': """Given the video, recognize the category of the video content. Embed the video with your answer.""",
      'target': TEXT_EMBED_INSTRUCTION})
-@AutoPairDataset.register_instruction("Breakfast",
+@AutoPairEvalDataset.register_instruction("Breakfast",
     {'query': """Given the video, recognize the breakfast type that the person is cooking in the video. Embed the video with your answer.""",
      'target': TEXT_EMBED_INSTRUCTION})
 class VideoClassificationEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):

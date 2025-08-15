@@ -16,8 +16,8 @@ class AutoPairDataset(metaclass=ABCMeta):
     instruction_registry = defaultdict(lambda: None)
 
     def __init_subclass__(cls):
-        if cls.__name__ not in AutoPairDataset.registry:
-            AutoPairDataset.registry[cls.__name__] = cls
+        if cls.__name__ not in cls.registry:
+            cls.registry[cls.__name__] = cls
         else:
             raise RuntimeError('Subclass "{cls.__name__}" has already defined.')
 
@@ -45,7 +45,7 @@ class AutoPairDataset(metaclass=ABCMeta):
     def register(cls, dataset_name):
         def inner_wrapper(wrapped_class):
             if dataset_name in cls.registry:
-                print(f"[Alert] AutoPairDataset: a class in the same name ({dataset_name}) has been registered")
+                print(f"[Alert] AutoPairEvalDataset: a class in the same name ({dataset_name}) has been registered")
             else:
                 cls.registry[dataset_name] = wrapped_class
             return wrapped_class
@@ -63,11 +63,19 @@ class AutoPairDataset(metaclass=ABCMeta):
                 dataset_names = dataset_name
             for name in dataset_names:
                 if name in cls.instruction_registry:
-                    print(f"[Alert] AutoPairDataset: a instruction in the same name ({name}) has been registered")
+                    print(f"[Alert] AutoPairEvalDataset: a instruction in the same name ({name}) has been registered")
                 else:
                     cls.instruction_registry[name] = instruction
             return wrapped_class
         return inner_wrapper
+    
+# create a copy for the AutoPairEvalDataset class
+class AutoPairEvalDataset(AutoPairDataset):
+    registry = {}
+    instruction_registry = defaultdict(lambda: None)
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
 def add_metainfo_hook(f):
     """
@@ -142,7 +150,7 @@ def init_sft_dataset(dataset_config, model_args, data_args, training_args, proce
 
     train_datasets = []
     for data_idx, (global_dataset_name, dataset_config) in enumerate(dataset_config.items()):
-        train_dataset = AutoPairDataset.instantiate(model_args=model_args, data_args=data_args, training_args=training_args, processor=processor, **dataset_config)
+        train_dataset = AutoPairEvalDataset.instantiate(model_args=model_args, data_args=data_args, training_args=training_args, processor=processor, **dataset_config)
         print_master(f"\t\tDataset#{data_idx} (dataset_parser={dataset_config.get('dataset_parser', 'n/a')}): {global_dataset_name}, num_rows={train_dataset.num_rows}")
         train_datasets.append(train_dataset)
 

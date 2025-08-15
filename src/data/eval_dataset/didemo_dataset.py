@@ -6,15 +6,15 @@ from src.data.utils.dataset_utils import load_hf_dataset, sample_dataset
 from src.data.utils.vision_utils import save_frames, process_video_frames
 from src.model.processor import process_input_text
 from ..prompts import (TEXT_EMBED_INSTRUCTION, VIDEO_EMBED_INSTRUCTION)
-from ..loader.mixed_dataset import AutoPairDataset
+from ..loader.mixed_dataset import AutoPairEvalDataset
 
 
 TASK_INST_QRY = "Find a video that includes the following described scenes:"
 TASK_INST_TGT = "Understand the content of the provided video."
 
 DATASET_PARSER_NAME = "didemo"
-@AutoPairDataset.register(DATASET_PARSER_NAME)
-@AutoPairDataset.register_instruction("DiDeMo",
+@AutoPairEvalDataset.register(DATASET_PARSER_NAME)
+@AutoPairEvalDataset.register_instruction("DiDeMo",
     {'query': TEXT_EMBED_INSTRUCTION,
      'target': VIDEO_EMBED_INSTRUCTION})
 class DiDemoEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):

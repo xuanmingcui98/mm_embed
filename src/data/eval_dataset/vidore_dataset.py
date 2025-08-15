@@ -6,7 +6,7 @@ from src.data.utils.dataset_utils import load_hf_dataset, sample_dataset, load_q
 from src.model.processor import process_input_text
 from src.utils import print_master
 from ..prompts import VISDOC_QA_RETRIEVAL_INSTRUCTION, VISDOC_EMBED_INSTRUCTION
-from ..loader.mixed_dataset import AutoPairDataset
+from ..loader.mixed_dataset import AutoPairEvalDataset
 
 # TASK_INST_QRY = "Find a document image that matches the given query:"
 # TASK_INST_TGT = "Understand the content of the provided document image."
@@ -33,8 +33,8 @@ VISDOC_QA_RETRIEVAL_DATASETS = [
 ]
 
 DATASET_PARSER_NAME = "vidore"
-@AutoPairDataset.register(DATASET_PARSER_NAME)
-@AutoPairDataset.register_instruction(VISDOC_QA_RETRIEVAL_DATASETS,
+@AutoPairEvalDataset.register(DATASET_PARSER_NAME)
+@AutoPairEvalDataset.register_instruction(VISDOC_QA_RETRIEVAL_DATASETS,
     {'query': VISDOC_QA_RETRIEVAL_INSTRUCTION,
      'target': VISDOC_EMBED_INSTRUCTION})
 class VidoreEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):

@@ -7,14 +7,14 @@ from src.data.utils.dataset_utils import load_hf_dataset
 from src.data.utils.vision_utils import save_frames, process_video_frames, VID_EXTENSIONS
 from src.model.processor import process_input_text
 from ..prompts import VIDEO_EMBED_INSTRUCTION
-from ..loader.mixed_dataset import AutoPairDataset
+from ..loader.mixed_dataset import AutoPairEvalDataset
 
 TASK_INST_QRY = "" # "Find the clip that corresponds to the described scene in the given video:"
 TASK_INST_TGT = "" # "Understand the content of the provided video."
 
 DATASET_PARSER_NAME = "moment_retrieval"
-@AutoPairDataset.register(DATASET_PARSER_NAME)
-@AutoPairDataset.register_instruction(["QVHighlight", "Charades-STA"],
+@AutoPairEvalDataset.register(DATASET_PARSER_NAME)
+@AutoPairEvalDataset.register_instruction(["QVHighlight", "Charades-STA"],
     {'query': """Given a video and a query, identify the clip in the video that best matches the query.\n\nQuery: {text}\n\nEmbed the clip with your answer.""",
      'target': VIDEO_EMBED_INSTRUCTION})
 

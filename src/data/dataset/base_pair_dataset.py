@@ -90,6 +90,7 @@ class BaseDatasetProcessor:
         self.data_parser_name = data_parser_name
 
         self.dataset_name = self.dataset_config.get("dataset_name")
+        self.subset_name = self.dataset_config.get("subset_name", None) or self.dataset_name
         self.dataset_split = self.dataset_config.get("dataset_split", "original")
         self.image_dir = self.dataset_config.get('image_dir')
         self.model_backbone = self.model_args.model_backbone
@@ -121,7 +122,7 @@ class BaseDatasetProcessor:
         else:
             self.meta_queries = ''
 
-        self.dataset_config['global_dataset_name'] = f'{self.data_parser_name}/{self.dataset_name}'
+        self.dataset_config['global_dataset_name'] = f'{self.data_parser_name}/{self.subset_name}'
         self.dataset_config['model_backbone'] = self.model_args.model_backbone
 
         self.dataset = self._load_hf_dataset()
@@ -217,7 +218,7 @@ class BaseDatasetProcessor:
             desc = self.target_descriptions
             instruction = self.instruction['target'] if self.instruction is not None else None
 
-        text = extract_fn(text, self.dataset_name)
+        text = extract_fn(text, self.subset_name)
         # make sure no extra visual tokens are left in the text
         text = text.replace(VLM_IMAGE_TOKENS[self.model_backbone], "")
         text = text.replace(VLM_VIDEO_TOKENS[self.model_backbone], "").strip()

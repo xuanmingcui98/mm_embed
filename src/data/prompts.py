@@ -88,8 +88,6 @@ def extract_query(qry, subset):
         return qry.replace("Represent the given dialogue about an image, which is used for image retrieval: ", "").strip()
     elif subset in {"N24News"}:
         return qry.replace("<|image_1|>\nRepresent the given news image with the following caption for domain classification: ", "").strip()
-    elif subset in TASK_TYPE["classification"] or subset in {"NIGHTS", "MSCOCO_i2t", "VisualNews_i2t"}:
-        return None
     else:
         return qry
 

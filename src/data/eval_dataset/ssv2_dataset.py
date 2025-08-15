@@ -8,7 +8,7 @@ from src.data.eval_dataset.video_classification_utils import DATASET_INSTRUCTION
 from src.data.utils.vision_utils import save_frames, process_video_frames
 from src.model.processor import process_input_text
 from ..prompts import TEXT_EMBED_INSTRUCTION
-from ..loader.mixed_dataset import AutoPairDataset
+from ..loader.mixed_dataset import AutoPairEvalDataset
 
 # TASK_INST_TGT = "Represent the following text:\n"
 
@@ -16,8 +16,8 @@ TASK_INST_QRY = ""
 TASK_INST_TGT = ""
 
 DATASET_PARSER_NAME = "ssv2"
-@AutoPairDataset.register(DATASET_PARSER_NAME)
-@AutoPairDataset.register_instruction("SmthSmthV2",
+@AutoPairEvalDataset.register(DATASET_PARSER_NAME)
+@AutoPairEvalDataset.register_instruction("SmthSmthV2",
     {'query': """Given the video, identify the actions or object interactions being performed by the person. Embed the video with your answer.""",
     'target': TEXT_EMBED_INSTRUCTION})
 class SSV2EvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
