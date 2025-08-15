@@ -2,14 +2,18 @@ from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 from abc import ABCMeta, abstractmethod
+from collections import defaultdict
+from typing import Union, List, Dict, Any
 from functools import wraps
-from datasets import Features, Value, Sequence
+from datasets import Features, Value, Sequence, IterableDataset
 import pickle, os
 from datasets import load_dataset, concatenate_datasets
 from ...model.processor import PHI3V, VLM_IMAGE_TOKENS, VLM_VIDEO_TOKENS
 from ...utils import print_master, print_rank
 from ..prompts import (get_query, get_target, 
                        format_description, format_text_for_chat_template, 
+                       extract_query, extract_target,
+                       IMAGE_TASKS,
                        TASK2ID)
 from ..utils.dataset_utils import sample_dataset
 from ..utils.vision_utils import save_frames, load_frames, sample_frames
@@ -68,6 +72,7 @@ RESOLUTION_MAPPING = {
 class AutoPairDataset(metaclass=ABCMeta):
     # Base class for auto datasets.
     registry = {}
+    instruction_registry = defaultdict(None)
 
     def __init_subclass__(cls):
         if cls.__name__ not in AutoPairDataset.registry:
@@ -85,7 +90,11 @@ class AutoPairDataset(metaclass=ABCMeta):
     @classmethod
     def instantiate(cls, dataset_parser, *args, **kwargs):
         try:
-            return cls.registry[dataset_parser](*args, **kwargs).load()
+            if kwargs.get("dataset_name") is not None:
+                instruction = cls.instruction_registry[kwargs["dataset_name"]]
+            else:
+                instruction = cls.instruction_registry[dataset_parser]
+            return cls.registry[dataset_parser](*args, **kwargs, instruction=instruction).load()
         except Exception as e:
             raise e
 
@@ -99,6 +108,19 @@ class AutoPairDataset(metaclass=ABCMeta):
             return wrapped_class
         return inner_wrapper
 
+    @classmethod
+    def register_instruction(cls, dataset_name: Union[str, List[str]], instruction):
+        """
+        Register the instruction for the dataset.
+        """
+        if isinstance(dataset_name, str):
+            dataset_name = [dataset_name]
+        for name in dataset_name:
+            if name in cls.instruction_registry:
+                print(f"[Alert] AutoPairDataset: a instruction in the same name ({name}) has been registered")
+            else:
+                cls.instruction_registry[name] = instruction
+
     @abstractmethod
     def main(self):
         pass
@@ -111,11 +133,16 @@ def add_metainfo_hook(f):
     def wrapper(*args, **kwargs):
         # go through data pipeline customized to each dataset
         batch_data = f(*args, **kwargs)
+        if isinstance(batch_data['query_text'], str) or batch_data['query_text'] is None:
+            # if the batch_data is a single sample
+            batch_data['global_dataset_name'] = kwargs.get("global_dataset_name", "None")
+            batch_data['task_id'] = [TASK2ID[kwargs['dataset_name']]]
+            return batch_data
         # append common metadata
         batch_size = len(batch_data['query_text'])
         global_dataset_name = kwargs.get("global_dataset_name", "None")
         batch_data['global_dataset_name'] = [global_dataset_name] * batch_size
-        batch_data['task_id'] = [TASK2ID[kwargs['subset_name']]] * batch_size
+        batch_data['task_id'] = [TASK2ID[kwargs['dataset_name']]] * batch_size
         return batch_data
 
     return wrapper
@@ -131,6 +158,7 @@ class BaseDatasetProcessor:
                  query_key_mm=None,
                  cand_key_text=None,
                  cand_key_mm=None,
+                 instruction=None,
                  **dataset_config):
         self.model_args = model_args
         self.data_args = data_args
@@ -139,12 +167,12 @@ class BaseDatasetProcessor:
         self.dataset_config = dataset_config
         self.data_parser_name = data_parser_name
 
-        self.dataset_name = self.dataset_config.get("dataset_name", self.data_parser_name)
-        self.subset_name = self.dataset_config.get("subset_name", self.dataset_name)
+        self.dataset_name = self.dataset_config.get("subset_name", self.dataset_name)
         self.dataset_split = self.dataset_config.get("dataset_split", "original")
         self.image_dir = self.dataset_config.get('image_dir', None)
         self.model_backbone = self.model_args.model_backbone
         self.image_resolution = self.dataset_config.get('image_resolution', None)
+        self.instruction = instruction
 
         self.query_key_text = query_key_text
         self.query_key_mm = query_key_mm
@@ -153,13 +181,13 @@ class BaseDatasetProcessor:
 
         self.query_descriptions = self.target_descriptions = None
         if data_args.query_description_dir is not None:
-            desc_path = os.path.join(data_args.query_description_dir, self.subset_name, "cot", "query.pkl")
+            desc_path = os.path.join(data_args.query_description_dir, self.dataset_name, "cot", "query.pkl")
             if os.path.exists(desc_path):
                 with open(desc_path, "rb") as f:
                     self.query_descriptions = pickle.load(f)
 
         if data_args.target_description_dir is not None:
-            desc_path = os.path.join(data_args.target_description_dir, self.subset_name, "cot", "target.pkl")
+            desc_path = os.path.join(data_args.target_description_dir, self.dataset_name, "cot", "target.pkl")
             if os.path.exists(desc_path):
                 with open(desc_path, "rb") as f:
                     self.target_descriptions = pickle.load(f)
@@ -171,9 +199,9 @@ class BaseDatasetProcessor:
         else:
             self.meta_queries = ''
 
-        self.dataset_config['global_dataset_name'] = f'{self.data_parser_name}/{self.subset_name}'
+        self.dataset_config['global_dataset_name'] = f'{self.data_parser_name}/{self.dataset_name}'
         self.dataset_config['model_backbone'] = self.model_args.model_backbone
-        self.dataset_config['subset_name'] = self.subset_name
+        self.dataset_config['dataset_name'] = self.dataset_name
 
         self.dataset = self._load_hf_dataset()
         # self.add_signature_columns()
@@ -184,12 +212,7 @@ class BaseDatasetProcessor:
 
         self.column_names = self.dataset.column_names
         self.dataset = sample_dataset(self.dataset, **dataset_config)
-        num_rows = self.dataset.num_rows
-        n_workers_per_node = self.training_args.dataloader_num_workers if self.training_args.dataloader_num_workers > 0 else 1
 
-        if not data_args.debug_prompt:
-            self.dataset = self.dataset.to_iterable_dataset(num_shards=n_workers_per_node)
-            setattr(self.dataset, 'num_rows', num_rows)
 
     def load(self):
         num_rows = self.dataset.num_rows
@@ -199,6 +222,16 @@ class BaseDatasetProcessor:
         for col_name in self.column_names:
             if col_name not in MULTIMODAL_FEATURES:
                 columns_to_remove.append(col_name)
+
+        num_rows = self.dataset.num_rows
+        
+        n_workers_per_node = self.training_args.dataloader_num_workers if self.training_args.dataloader_num_workers > 0 else 1
+        # if self.data_args.combine_image_datasets:
+        #     n_workers_per_node = 8 * self.dataset_config['world_size'] * n_workers_per_node
+
+        if not self.data_args.debug_prompt:
+            self.dataset = self.dataset.to_iterable_dataset(num_shards=n_workers_per_node)
+            setattr(self.dataset, 'num_rows', num_rows)
 
         self.dataset = self.dataset.map(
                             lambda x:
@@ -228,11 +261,11 @@ class BaseDatasetProcessor:
             num_rows *= 2
             
         # self.dataset = self.dataset.add_column("global_dataset_name", [self.dataset_config.get("global_dataset_name", self.data_parser_name)] * num_rows)
-        # self.dataset = self.dataset.add_column("task_id", [TASK2ID[self.subset_name]] * num_rows)
+        # self.dataset = self.dataset.add_column("task_id", [TASK2ID[self.dataset_name]] * num_rows)
 
-        print_master(f"Loaded {self.data_parser_name}/{self.subset_name} dataset with {num_rows} samples")
-        if not self.data_args.debug_prompt:
-
+        print_master(f"Loaded {self.data_parser_name}/{self.dataset_name} dataset with {num_rows} samples")
+        
+        if not self.data_args.debug_prompt and isinstance(self.dataset, IterableDataset):
             setattr(self.dataset, 'num_rows', num_rows)
         
         return self.dataset
@@ -243,7 +276,7 @@ class BaseDatasetProcessor:
             May be implemented by subclasses.
         """
 
-        dataset = load_dataset(self.dataset_name, self.subset_name, split=f"{self.dataset_split}")
+        dataset = load_dataset(self.dataset_name, self.dataset_name, split=f"{self.dataset_split}")
 
         return dataset
 
@@ -283,8 +316,20 @@ class BaseDatasetProcessor:
     
     def format_text_for_chat_template(self, is_query, text, image_path=None, video_path=None, key=None, add_generation_prompt=False):
 
-        # remove image/video pad token
+        if is_query:
+            extract_fn = extract_query
+            desc = self.query_descriptions
+            instruction = self.instruction['query'] if self.instruction is not None else None
+        else:
+            extract_fn = extract_target
+            desc = self.target_descriptions
+            instruction = self.instruction['target'] if self.instruction is not None else None
 
+        text = extract_fn(text, self.dataset_name)
+        if instruction is not None:
+            text = instruction.format(text=text)
+
+        # make sure no extra visual tokens are left in the text
         text = text.replace(VLM_IMAGE_TOKENS[self.model_backbone], "")
         text = text.replace(VLM_VIDEO_TOKENS[self.model_backbone], "").strip()
 
@@ -333,8 +378,6 @@ class BaseDatasetProcessor:
                 continue
 
             if data_args.apply_chat_template:
-                qry_text = get_query(self.subset_name, qry_text, with_description=self.query_descriptions is not None, cot_prompt=data_args.use_cot)
-                pos_text = get_target(self.subset_name, pos_text, with_description=self.target_descriptions is not None, cot_prompt=data_args.use_cot)
                 qry_text = self.format_text_for_chat_template(is_query=True, text=qry_text, image_path=qry_image_path, add_generation_prompt=False, key=(qry_text, qry_image_path))
                 pos_text = self.format_text_for_chat_template(is_query=False, text=pos_text, image_path=pos_image_path, add_generation_prompt=False, key=(pos_text, pos_image_path))
             else:
@@ -359,6 +402,43 @@ class BaseDatasetProcessor:
         return {"query_text": query_texts, "query_image": query_images,
                 "pos_text": pos_texts, "pos_image": pos_images,
                 "neg_text": neg_texts, "neg_image": neg_images}
+
+    @add_metainfo_hook
+    def single_preprocess(self, batch_dict, *args, **kwargs):
+        """
+            Preprocess a single sample.
+            May be implemented by subclasses.
+        """
+        qry_text, qry_image_path, pos_text, pos_image_path, neg_text, neg_image_path = \
+            batch_dict['qry'], batch_dict['qry_image_path'], \
+            batch_dict['pos_text'], batch_dict['pos_image_path'], \
+            batch_dict.get('neg_text', ''), batch_dict.get('neg_image_path', None)
+        if (not qry_text and not qry_image_path) or (not pos_text and not pos_image_path):
+            print("empty inputs")
+            return None
+        
+        if self.data_args.apply_chat_template:
+            qry_text = self.format_text_for_chat_template(is_query=True, text=qry_text, image_path=qry_image_path, add_generation_prompt=False, key=(qry_text, qry_image_path))
+            pos_text = self.format_text_for_chat_template(is_query=False, text=pos_text, image_path=pos_image_path, add_generation_prompt=False, key=(pos_text, pos_image_path))
+        else:
+            if self.model_backbone != PHI3V:
+                qry_text = qry_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[self.model_backbone])
+                pos_text = pos_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[self.model_backbone])
+                neg_text = neg_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[self.model_backbone]) if neg_text else ''
+        
+        qry_image = {"bytes": [None], "paths": [os.path.join(self.image_dir, qry_image_path) if qry_image_path else None], "resolutions": [RESOLUTION_MAPPING.get(self.image_resolution, None)]}
+        pos_image = {"bytes": [None], "paths": [os.path.join(self.image_dir, pos_image_path) if pos_image_path else None], "resolutions": [RESOLUTION_MAPPING.get(self.image_resolution, None)]}
+        neg_image = {"bytes": [None], "paths": [os.path.join(self.image_dir, neg_image_path) if neg_image_path else None], "resolutions": [RESOLUTION_MAPPING.get(self.image_resolution, None)]}
+            
+        return {
+            "query_text": qry_text,
+            "query_image": qry_image,
+            "pos_text": pos_text,
+            "pos_image": pos_image,
+            "neg_text": neg_text,
+            "neg_image": neg_image,
+        }
+
 
 
 class VideoDatasetProcessor(BaseDatasetProcessor):
@@ -424,3 +504,50 @@ class VideoDatasetProcessor(BaseDatasetProcessor):
         return {"query_text": query_texts, "query_image": query_images,
                 "pos_text": pos_texts, "pos_image": pos_images,
                 "neg_text": neg_texts, "neg_image": neg_images,}
+
+    @add_metainfo_hook
+    def single_preprocess(self, batch_dict, *args, **kwargs):
+
+        batch_dict_to_list = {k: [v] for k, v in batch_dict.items()}
+        one_sample = self._process_one_sample(0, batch_dict_to_list, *args, **kwargs)
+
+        query_text, query_image, pos_text, pos_image, neg_text, neg_image  = \
+            one_sample['query_text'], one_sample['query_image'], \
+            one_sample['pos_text'], one_sample['pos_image'], \
+            one_sample['neg_text'], one_sample['neg_image']
+        
+        if self.data_args.apply_chat_template:
+
+            query_image_input = query_video_input = None
+            if query_image:
+                if len(query_image['paths']) > 1:
+                    query_video_input = query_image['paths'][0] or query_image['bytes'][0]
+                else:
+                    query_image_input = query_image['paths'][0] or query_image['bytes'][0]
+            
+            pos_image_input = pos_video_input = None
+            if pos_image:
+                if len(pos_image['paths']) > 1:
+                    pos_video_input = pos_image['paths'][0] or pos_image['bytes'][0]
+                else:
+                    pos_image_input = pos_image['paths'][0] or pos_image['bytes'][0]
+            
+            query_key_text = batch_dict[self.query_key_text] if self.query_key_text else ""
+            query_key_mm = batch_dict[self.query_key_mm] if self.query_key_mm else ""
+            cand_key_text = batch_dict[self.cand_key_text] if self.cand_key_text else ""
+            cand_key_mm = batch_dict[self.cand_key_mm] if self.cand_key_mm else ""
+            query_text = self.format_text_for_chat_template(
+                is_query=True, text=query_text, image_path=query_image_input, video_path=query_video_input, 
+                key=(query_key_text, query_key_mm))
+            pos_text = self.format_text_for_chat_template(
+                is_query=False, text=pos_text, image_path=pos_image_input, video_path=pos_video_input, 
+                key=(cand_key_text, cand_key_mm))
+            
+        return {
+            "query_text": query_text,
+            "query_image": query_image,
+            "pos_text": pos_text,
+            "pos_image": pos_image,
+            "neg_text": neg_text,
+            "neg_image": neg_image,
+        }

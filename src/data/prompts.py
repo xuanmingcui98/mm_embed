@@ -13,8 +13,6 @@ import re
 
 
 IMAGE_TASKS = {'ImageNet-1K', "ImageNet_1K", 'N24News', 'HatefulMemes', 'VOC2007', 'SUN397', 'A-OKVQA', 'MSCOCO', 'Place365', 'ImageNet-A', 'ImageNet-R', 'ObjectNet', 'Country211', 'OK-VQA', 'RefCOCO', 'DocVQA', 'InfographicsVQA', 'ChartQA', 'NIGHTS', 'FashionIQ', 'ScienceQA', 'Visual7W', 'VizWiz', 'GQA', 'TextVQA', 'VisDial', 'CIRR', 'VisualNews_t2i', 'VisualNews_i2t', 'MSCOCO_t2i', 'MSCOCO_i2t', 'Wiki-SS-NQ', 'WebQA', 'OVEN', 'EDIS', 'RefCOCO-Matching', 'Visual7W-Pointing'}
-
-
 VIDEO_TASKS = {"video_caption_300k", "video_qa_240k", "video_caption_300k-video", # train
                'SmthSmthV2', 'HMDB51', 'UCF101', 'Kinetics-700', 'Breakfast', 'MSR-VTT', 'MSVD', 'DiDeMo', 'YouCook2', 'VATEX', 'QVHighlight', 'Charades-STA', 'MomentSeeker', 'Video-MME', 'NExTQA', 'EgoSchema', 'MVBench', 'ActivityNetQA'}
 VISDOC_TASKS = {"openbmb/VisRAG-Ret-Train-In-domain-data", "vidore/colpali_train_set",
@@ -29,12 +27,21 @@ ALL_EVAL_VISDOC_TASKS = VISDOC_TASKS - {"openbmb/VisRAG-Ret-Train-In-domain-data
 
 TASK2ID = dict(zip(ALL_TASKS, range(len(ALL_TASKS))))
 
-task_categories = {
+TASK_TYPE = {
     "classification": {"ImageNet-1K", "ImageNet_1K", "N24News", "HatefulMemes", "VOC2007", "SUN397", "Place365", "ImageNet-A", "ImageNet-R", "ObjectNet", "Country211"},
     "vqa": {"OK-VQA", "A-OKVQA", "DocVQA", "InfographicsVQA", "ChartQA", "Visual7W", "ScienceQA", "VizWiz", "GQA", "TextVQA"},
     "retrieval": {"VisDial", "CIRR", "VisualNews_t2i", "VisualNews_i2t", "MSCOCO_t2i", "MSCOCO_i2t", "NIGHTS", "WebQA", "FashionIQ", "Wiki-SS-NQ", "OVEN", "EDIS"},
     "grounding": {"MSCOCO", "RefCOCO", "RefCOCO-Matching", "Visual7W-Pointing"}
 }
+
+
+TEXT_EMBED_INSTRUCTION  = """Embed the following text:\n\n{text}"""
+IMAGE_EMBED_INSTRUCTION = """Given the image, generate a detailed description.\n\nEmbed the image with the description."""
+VISDOC_EMBED_INSTRUCTION = """Given the document image, generate a detailed description of the document.\n\nEmbed the document image with the description."""
+VIDEO_EMBED_INSTRUCTION = """Given the video, generate a detailed description of the video.\n\nEmbed the video with the description."""
+
+VISDOC_RETRIEVAL_INSTRUCTION = """Given a question, determine the visual document that would help answer the question.\n\nQuestion: {query}\n\nEmbed your answer."""
+
 
 def format_description(description, prompt_format="gt_only"):
     if description is None:
@@ -68,7 +75,7 @@ def extract_query(qry, subset):
         return qry.replace("<|image_1|>\nSelect the portion of the image that answers the question ", "").strip()
     elif subset in {"MSCOCO"}:
         return re.search(r'"([^"]*)"', qry).group(1).strip()
-    elif subset in task_categories["vqa"]:
+    elif subset in TASK_TYPE["vqa"]:
         return qry.replace("<|image_1|>\nRepresent the given image with the following question: ", "").strip()
     elif subset in {"VisualNews_t2i"}:
         return qry.replace("Retrieve an image of this news caption. ", "").strip()
@@ -80,7 +87,7 @@ def extract_query(qry, subset):
         return qry.replace("Represent the given dialogue about an image, which is used for image retrieval: ", "").strip()
     elif subset in {"N24News"}:
         return qry.replace("<|image_1|>\nRepresent the given news image with the following caption for domain classification: ", "").strip()
-    elif subset in task_categories["classification"] or subset in {"NIGHTS", "MSCOCO_i2t", "VisualNews_i2t"}:
+    elif subset in TASK_TYPE["classification"] or subset in {"NIGHTS", "MSCOCO_i2t", "VisualNews_i2t"}:
         return None
     else:
         raise ValueError(f"Unknown subset: {subset}")
@@ -126,7 +133,7 @@ def format_text_for_chat_template(processor, text, image_path, video_path=None, 
 query_user_prompts_cot = {}
 
 for task in IMAGE_TASKS:
-    if task in task_categories['vqa']:
+    if task in TASK_TYPE['vqa']:
         query_user_prompts_cot[task] = """Given the image and the below question, answer the question based on the image. Let's think step by step.
 
 Question: {query}"""
@@ -240,7 +247,7 @@ News text: {query}"""
         target_user_prompts_cot[task] = """Given an image, first generate a detailed and informative description of the image, and then generate a summarization based on the description. Let's think step by step."""
     elif task in {"RefCOCO-Matching"}:
         target_user_prompts_cot[task] = query_user_prompts_cot["MSCOCO"]
-    elif task in task_categories['vqa'] | task_categories['classification']:
+    elif task in TASK_TYPE['vqa'] | TASK_TYPE['classification']:
         target_user_prompts_cot[task] = """Represent the following text as text embeddings.
 Answer: {query}"""
 
@@ -254,6 +261,9 @@ for task in VIDEO_TASKS:
 for task in VIDEO_TASKS:
     if task in {"MSR-VTT"}:
         target_user_prompts_cot[task] = """Understand the content of the provided video."""
+
+
+
 
 
 def get_query(task, query, use_cot=True, **kwargs):

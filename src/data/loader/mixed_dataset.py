@@ -1,7 +1,8 @@
 from datasets.distributed import split_dataset_by_node
-
-from src.data.dataset.base_pair_dataset import AutoPairDataset
-from src.data.dataset.hf_datasets import interleave_datasets
+from datasets import concatenate_datasets
+from ..dataset.base_pair_dataset import AutoPairDataset
+from ..dataset.hf_datasets import interleave_datasets
+from ..prompts import IMAGE_TASKS, TASK_TYPE
 from src.utils import print_master
 import torch
 
@@ -16,6 +17,7 @@ def init_mixed_dataset(dataset_config, model_args, data_args, training_args, pro
     probs = [w / w_sum for w in weights]
     world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
     train_datasets = []
+
     for data_idx, (global_dataset_name, dataset_config) in enumerate(dataset_config.items()):
         dataset_config['world_size'] = world_size
         train_dataset = AutoPairDataset.instantiate(model_args=model_args, data_args=data_args, training_args=training_args, processor=processor, **dataset_config)

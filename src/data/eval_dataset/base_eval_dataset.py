@@ -82,6 +82,7 @@ class ImageVideoInstance:
 class AutoEvalPairDataset(metaclass=ABCMeta):
     # Base class for auto datasets.
     registry = {}
+    instruction_registry = {}
 
     def __init_subclass__(cls):
         if cls.__name__ not in AutoEvalPairDataset.registry:
@@ -104,13 +105,15 @@ class AutoEvalPairDataset(metaclass=ABCMeta):
             raise e
 
     @classmethod
-    def register(cls, dataset_name):
+    def register(cls, dataset_name, instruction: dict = None):
+        # instruction should be a dict with keys: "query", "target"
         def inner_wrapper(wrapped_class):
             if dataset_name in cls.registry:
                 print(f"[Alert] AutoPairDataset: a class in the same name ({dataset_name}) has been registered")
             else:
                 # print(f"Adding {dataset_name}")
                 cls.registry[dataset_name] = wrapped_class
+                cls.instruction_registry[dataset_name] = instruction
             return wrapped_class
         return inner_wrapper
 
@@ -179,6 +182,7 @@ class BaseEvalDatasetProcessor:
                  processor,
                  query_key_text=None, query_key_mm=None,
                  cand_key_text=None, cand_key_mm=None,
+                 instruction = None,
                  **dataset_config):
         self.model_args = model_args
         self.data_args = data_args
@@ -196,6 +200,7 @@ class BaseEvalDatasetProcessor:
         self.dataset_config['model_backbone'] = model_args.model_backbone
         self.dataset_config['image_resolution'] = data_args.image_resolution
         self.apply_chat_template = data_args.apply_chat_template
+        self.instruction = instruction
 
         self.model_backbone = self.dataset_config['model_backbone']
 
@@ -438,10 +443,6 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
         for qry_text, qry_image_path, tgt_texts, tgt_image_paths in (
                 zip(batch_dict['qry_text'], batch_dict['qry_img_path'], batch_dict['tgt_text'], batch_dict['tgt_img_path'])):
 
-            qry_description = None
-            if self.query_descriptions is not None:
-                qry_description = format_description(self.query_descriptions[(qry_text, qry_image_path)], self.data_args.use_cot)
-
             if qry_image_path.strip():
                 query_images.append([{"bytes": [None], "paths": [os.path.join(image_root, qry_image_path)],
                                     "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]}])
@@ -461,7 +462,11 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
                         tgts.append(self.target_cache[(tgt_text, tgt_image_path)])
                     cand_texts.append(tgts)
             else:
-                qry_text = get_query(self.subset_name, qry_text, self.data_args.use_cot)
+                if self.instruction is not None:
+                    qry_text = self.instruction['query'].format(text=extract_query(qry_text, self.subset_name))
+                else:
+                    qry_text = get_query(self.subset_name, qry_text, self.data_args.use_cot)
+                
                 qry_text = self.format_text_for_chat_template(True, 
                                                               text=qry_text, 
                                                               image_path=qry_image_path, 
@@ -470,9 +475,13 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
                 cand_text = []
                 for tgt_cap, tgt_img_path in zip(tgt_texts, tgt_image_paths):
                     if (tgt_cap, tgt_img_path) not in self.target_cache:
+                        if self.instruction is not None:
+                            tgt_text = self.instruction['target'].format(text=extract_target(tgt_cap, self.subset_name))
+                        else:
+                            tgt_text = get_target(self.subset_name, tgt_cap, self.data_args.use_cot)
                         self.target_cache[(tgt_cap, tgt_img_path)] = self.format_text_for_chat_template(
                                                                         False, 
-                                                                        text=get_target(self.subset_name, tgt_cap, self.data_args.use_cot), 
+                                                                        text=tgt_text, 
                                                                         image_path=tgt_img_path, 
                                                                         add_generation_prompt=self.model_args.do_sft_target,
                                                                         key=(tgt_cap, tgt_img_path))

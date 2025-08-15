@@ -40,6 +40,7 @@ LamRA = 'lamra'  # QWEN2-VL
 LamRA_QWEN2_5 = 'lamra_qwen25'  # QWEN2.5-VL
 COLPALI = 'colpali'  # PaliGemma-3B
 E5_V = 'e5_v'  # Llava_next
+PLM = 'perception_lm'
 MODEL2BACKBONE = {  # keys are from hf_config.model_type or manually added if not provided
     'phi3_v': PHI3V,
     'llava_next': LLAVA_NEXT,
@@ -55,6 +56,7 @@ MODEL2BACKBONE = {  # keys are from hf_config.model_type or manually added if no
     'colpali': COLPALI,
     "internvl3": INTERNVL3,
     'e5_v': E5_V,
+    'perception_lm': PLM
 }
 SUPPORTED_MODELS = set(MODEL2BACKBONE.keys())
 
@@ -72,6 +74,7 @@ VLM_IMAGE_TOKENS = {
     INTERNVIDEO2: "",
     COLPALI: "",
     E5_V: "<image>",
+    PLM: "<|image_pad|>"
 }
 
 VLM_VIDEO_TOKENS = {
@@ -87,6 +90,7 @@ VLM_VIDEO_TOKENS = {
     INTERNVL3: "<video>",
     COLPALI: "",
     E5_V: "<image>",
+    PLM: "<|video_pad|>",
 }
 
 backbone2model = {
@@ -98,7 +102,8 @@ backbone2model = {
     QWEN2_5_VL_TOKENSELECTION: Qwen2_5_VL_TokenSelectionForConditionalGeneration,
     INTERNVIDEO2: InternVideo2_Stage2,
     E5_V: LlavaNextForConditionalGeneration,
-    INTERNVL3: AutoModelForImageTextToText
+    INTERNVL3: AutoModelForImageTextToText,
+    PLM: AutoModelForImageTextToText
 }
 
 def get_visual_token_ids(processor):

@@ -72,10 +72,11 @@ def main():
     setattr(model_args, "model_backbone", "qwen2_vl")
     train_dataset = init_mixed_dataset(dataset_config, model_args, data_args, training_args, processor)
     for row in train_dataset:
-        print(f"Dataset: {row['global_dataset_name']}")
-        print(f"Query: {row['query_text']}")
-        print(f"Target: {row['pos_text']}")
-        prompts[row['global_dataset_name']] = (row['query_text'], row['pos_text'])
+        if row['global_dataset_name'] not in prompts:
+            print(f"Dataset: {row['global_dataset_name']}")
+            print(f"Query: {row['query_text']}")
+            print(f"Target: {row['pos_text']}")
+            prompts[row['global_dataset_name']] = (row['query_text'], row['pos_text'])
 
     filename = "training_prompts"
     if data_args.apply_chat_template:

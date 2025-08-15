@@ -6,7 +6,7 @@ tasks = ['ImageNet-1K', "ImageNet_1K", 'N24News', 'HatefulMemes', 'VOC2007', 'SU
          'VizWiz', 'GQA', 'TextVQA', 'VisDial', 'CIRR', 'VisualNews_t2i', 'VisualNews_i2t', 'MSCOCO_t2i', 
          'MSCOCO_i2t', 'Wiki-SS-NQ', 'WebQA', 'OVEN', 'EDIS', 'RefCOCO-Matching', 'Visual7W-Pointing']
 
-task_categories = {
+TASK_TYPE = {
     "classification": {"ImageNet-1K", "ImageNet_1K", "N24News", "HatefulMemes", "VOC2007", "SUN397", "Place365", "ImageNet-A", "ImageNet-R", "ObjectNet", "Country211"},
     "vqa": {"OK-VQA", "A-OKVQA", "DocVQA", "InfographicsVQA", "ChartQA", "Visual7W", "ScienceQA", "VizWiz", "GQA", "TextVQA"},
     "retrieval": {"VisDial", "CIRR", "VisualNews_t2i", "VisualNews_i2t", "MSCOCO_t2i", "MSCOCO_i2t", "NIGHTS", "WebQA", "FashionIQ", "Wiki-SS-NQ", "OVEN", "EDIS"},
@@ -45,7 +45,7 @@ def extract_query(qry, subset):
         return qry.replace("<|image_1|>\nSelect the portion of the image that answers the question ", "").strip()
     elif subset in {"MSCOCO"}:
         return re.search(r'"([^"]*)"', qry).group(1).strip()
-    elif subset in task_categories["vqa"]:
+    elif subset in TASK_TYPE["vqa"]:
         return qry.replace("<|image_1|>\nRepresent the given image with the following question: ", "").strip()
     elif subset in {"VisualNews_t2i"}:
         return qry.replace("Retrieve an image of this news caption. ", "").strip()
@@ -57,7 +57,7 @@ def extract_query(qry, subset):
         return qry.replace("Represent the given dialogue about an image, which is used for image retrieval: ", "").strip()
     elif subset in {"N24News"}:
         return qry.replace("<|image_1|>\nRepresent the given news image with the following caption for domain classification: ", "").strip()
-    elif subset in task_categories["classification"] or subset in {"NIGHTS", "MSCOCO_i2t", "VisualNews_i2t"}:
+    elif subset in TASK_TYPE["classification"] or subset in {"NIGHTS", "MSCOCO_i2t", "VisualNews_i2t"}:
         return None
     else:
         raise ValueError(f"Unknown subset: {subset}")
@@ -99,7 +99,7 @@ def format_text(processor, text, image_path, description=None, add_generation_pr
 query_user_prompts_cot = {}
 
 for task in tasks:
-    if task in task_categories['vqa']:
+    if task in TASK_TYPE['vqa']:
         query_user_prompts_cot[task] = """Given the image and the below question, answer the question based on the image. Explain your reasoning briefly.
 
 Question: {query}"""
@@ -197,7 +197,7 @@ News text: {query}"""
         target_user_prompts_cot[task] = """Given an image, first generate a detailed and informative description of the image, and then generate a summarization based on the description. Explain your reasoning briefly."""
     elif task in {"RefCOCO-Matching"}:
         target_user_prompts_cot[task] = query_user_prompts_cot["MSCOCO"]
-    elif task in task_categories['vqa'] | task_categories['classification']:
+    elif task in TASK_TYPE['vqa'] | TASK_TYPE['classification']:
         target_user_prompts_cot[task] = query_user_prompts_cot[task]    
 
 def get_query(task, query, use_cot=True):

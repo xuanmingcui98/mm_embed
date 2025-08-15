@@ -11,420 +11,83 @@ from ..dataset.base_pair_dataset import AutoPairDataset, add_metainfo_hook, MULT
 from src.model.processor import PHI3V, VLM_IMAGE_TOKENS
 from src.utils import print_master, print_rank
 from torch.utils.data import Dataset
-from ..prompts import get_query, get_target, format_description, format_text_for_chat_template
+from ..prompts import IMAGE_TASKS, TASK_TYPE
 from functools import partial
 import torch
 from .base_pair_dataset import BaseDatasetProcessor
+from ..prompts import (TEXT_EMBED_INSTRUCTION, 
+                       IMAGE_EMBED_INSTRUCTION, 
+                       VISDOC_EMBED_INSTRUCTION, 
+                       VIDEO_EMBED_INSTRUCTION, 
+                       VISDOC_RETRIEVAL_INSTRUCTION)
 
-
-def process_image(image, resolution, max_dim=1344):
-    if image is None:
-        return None
-    if resolution == "high":
-        image = image.resize((1344, 1344))
-    elif resolution == "mid":
-        image = image.resize((672, 672))
-    elif resolution == "low":
-        image = image.resize((128, 128))
-    else:
-        cur_max_dim = max(image.size)
-        if cur_max_dim > max_dim:
-            image = image.resize((max_dim, max_dim))
-    return image
-
-
-def get_image_bytes_and_path(img_path, image_dir, model_backbone, image_resolution):
-    '''
-    caveat: datasets will convert PIL.Image.Image objects into Arrow-compatible types (aka bytes) behind the scene and only image.filename is reserved (datasets/features/image.py L311)
-    solution: (20240227) defer image loading and transforming to data-loader to avoid repeatedly Serialization/Deserialization of PIL Images
-    '''
-    if not img_path:
-        return None
-    full_img_path = os.path.join(image_dir, img_path)
-    image = Image.open(full_img_path)
-    backbone = model_backbone
-    if backbone != PHI3V and image_resolution:
-        image = process_image(image,  image_resolution)
-    bytes = image_to_bytes(image)
-    return {"bytes": bytes, "path": full_img_path}
-
-
-@add_metainfo_hook
-def data_prepare(batch_dict, data_args, model_args, processor, *args, **kwargs):
-    image_dir = kwargs['image_dir']
-    model_backbone = kwargs['model_backbone']
-    image_resolution = kwargs['image_resolution']
-
-    is_train = kwargs.get("dataset_split", "original") == "original"
-
-    batch_size = len(batch_dict['qry'])
-    query_texts, query_images, pos_texts, pos_images, neg_texts, neg_images = [], [], [], [], [], []
-    for qry_text, qry_image_path, pos_text, pos_image_path, neg_text, neg_image_path in \
-        zip(batch_dict['qry'], batch_dict['qry_image_path'],
-            batch_dict['pos_text'], batch_dict['pos_image_path'],
-            batch_dict.get('neg_text', [''] * batch_size), batch_dict.get('neg_image_path', [None] * batch_size)):
-        if (not qry_text and not qry_image_path) or (not pos_text and not pos_image_path):
-            print("empty inputs")
-            continue
-
-        qry_description = pos_description = None
-        if kwargs['query_descriptions'] is not None:
-            qry_description = format_description(kwargs['query_descriptions'].get((qry_text, qry_image_path), None), data_args.use_cot)
-
-        if kwargs['target_descriptions'] is not None:
-            pos_description = format_description(kwargs['target_descriptions'].get((pos_text, pos_image_path), None), data_args.use_cot)
-
-        if data_args.apply_chat_template:
-            qry_text = get_query(kwargs['subset_name'], qry_text, data_args.use_cot)
-            pos_text = get_target(kwargs['subset_name'], pos_text, data_args.use_cot)
-            qry_text = format_text_for_chat_template(processor, qry_text, qry_image_path, description=qry_description, add_generation_prompt=not is_train and model_args.do_sft_query)
-            pos_text = format_text_for_chat_template(processor, pos_text, pos_image_path, description=pos_description, add_generation_prompt=not is_train and model_args.do_sft_target)
-        else:
-            if model_backbone != PHI3V:
-                qry_text = qry_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[model_backbone])
-                pos_text = pos_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[model_backbone])
-                neg_text = neg_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[model_backbone]) if neg_text else ''
-
-        query_texts.append(qry_text)
-        pos_texts.append(pos_text)
-        neg_texts.append(neg_text)
-        # 20240227 defer image loading and transforming to data-loader to avoid repeatedly Serialization/Deserialization of PIL Images
-        qry_image = {"bytes": [None], "paths": [os.path.join(image_dir, qry_image_path) if qry_image_path else None], "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]}
-        pos_image = {"bytes": [None], "paths": [os.path.join(image_dir, pos_image_path) if pos_image_path else None], "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]}
-        neg_image = {"bytes": [None], "paths": [os.path.join(image_dir, neg_image_path) if neg_image_path else None], "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]}
-        query_images.append(qry_image)
-        pos_images.append(pos_image)
-        neg_images.append(neg_image)
-    if len(query_texts) == 0:
-        print('something went wrong')
-    # print_rank(f"global_dataset_name={kwargs.get('global_dataset_name', DATASET_PARSER_NAME)}, batch_size={batch_size}, processed_batch_size={len(query_texts)}")
-    return {"query_text": query_texts, "query_image": query_images,
-            "pos_text": pos_texts, "pos_image": pos_images,
-            "neg_text": neg_texts, "neg_image": neg_images}
 
 
 DATASET_PARSER_NAME = "mmeb"
 @AutoPairDataset.register(DATASET_PARSER_NAME)
+@AutoPairDataset.register_instruction([task for task in IMAGE_TASKS if task in TASK_TYPE['vqa']],
+                                      {'query': """Given the image and the below question, answer the question based on the image.\n\nQuestion: {query}\n\nEmbed your answer.""",
+                                        'target': TEXT_EMBED_INSTRUCTION })
+@AutoPairDataset.register_instruction(["ImageNet-1K", "ImageNet_1K", "ImageNet-A", "ImageNet-R", "VOC2007", "ObjectNet"], {
+                                        'query': """Given the image, identify the main object in the image.\n\nEmbed your answer.""",
+                                        'target': TEXT_EMBED_INSTRUCTION })
+@AutoPairDataset.register_instruction(["Country211"],
+                                      {'query': """Given an image, identify the country where it was taken.\n\nEmbed your answer.""",
+                                       'target': TEXT_EMBED_INSTRUCTION })
+@AutoPairDataset.register_instruction(["HatefulMemes"],
+                                      {'query': """Given an image, determine if it contains hateful speech.\n\nEmbed your answer.""",
+                                       'target': TEXT_EMBED_INSTRUCTION })
+@AutoPairDataset.register_instruction(["SUN397", "Place365"],
+                                      {'query': """Given an image, identify the scene it depicts.\n\nEmbed your answer.""",
+                                       'target': TEXT_EMBED_INSTRUCTION })
+@AutoPairDataset.register_instruction("N24News",
+                                      {'query': """Given an image and the below news text, identify the main domain of the news.\n\nNews text: {query}\n\nEmbed your answer.""",
+                                       'target': TEXT_EMBED_INSTRUCTION })
+@AutoPairDataset.register_instruction("VisDial",
+                                      {'query': """Given the dialogue about an image, generate a description of the image based on the dialogue.\n\n{query}\n\nEmbed your answer.""",
+                                       'target': IMAGE_EMBED_INSTRUCTION})
+@AutoPairDataset.register_instruction("CIRR",
+                                      {'query': """Given a base image and a modification instruction of how to modify the base image to get the target image, generate a description of the target image.\n\nModification instruction: {query}\n\nEmbed the image with the instruction and your answer.""",
+                                       'target': IMAGE_EMBED_INSTRUCTION})
+@AutoPairDataset.register_instruction("FashionIQ",
+                                      {'query': """Given a garment image and a modification instruction of how to modify the garment in the base garment image to get the target garment, generate a description of the target garment.\n\nEmbed the image with the instruction and your answer.""",
+                                       'target': """Given an garment image, generate a detailed description, and embed these content."""})
+@AutoPairDataset.register_instruction(["MSCOCO_t2i", "VisualNews_t2i"],
+                                      {'query': TEXT_EMBED_INSTRUCTION ,
+                                       'target': IMAGE_EMBED_INSTRUCTION})
+@AutoPairDataset.register_instruction(["VisualNews_i2t", "MSCOCO_i2t"],
+                                      {'query': IMAGE_EMBED_INSTRUCTION,
+                                       'target': TEXT_EMBED_INSTRUCTION })
+@AutoPairDataset.register_instruction(["MSCOCO", "Visual7W-Pointing", "RefCOCO"],
+                                      {'query': """Given an image and a query, identify the object or region in the image that the query refers to, and generate a concise description of the object or region.\n\nQuery: {query}\n\nEmbed the object with the answer.""",
+                                       'target': IMAGE_EMBED_INSTRUCTION})
+@AutoPairDataset.register_instruction(["RefCOCO-Matching"],
+                                      {'query': """Given an image and a query, identify the object or region in the image that the query refers to, and generate a concise description of the object or region.\n\nQuery: {query}\n\nEmbed the object with the answer.""",
+                                       'target': TEXT_EMBED_INSTRUCTION })
+@AutoPairDataset.register_instruction(["WebQA", "OVEN"],
+                                      {'query': """Given a question, determine what kind of image-text pair would help answer the question.\n\nQuestion: {query}\n\nEmbed your answer.""",
+                                       'target': TEXT_EMBED_INSTRUCTION })
+@AutoPairDataset.register_instruction("EDIS",
+                                      {'query': """Given a news text, determine a similar image-text pair.\n\nEmbed your answer.""",
+                                       'target': TEXT_EMBED_INSTRUCTION })
+@AutoPairDataset.register_instruction("Wiki-SS-NQ",
+                                      {'query': VISDOC_RETRIEVAL_INSTRUCTION,
+                                        'target': TEXT_EMBED_INSTRUCTION })
+@AutoPairDataset.register_instruction("NIGHTS",
+                                      {'query': IMAGE_EMBED_INSTRUCTION,
+                                       'target': IMAGE_EMBED_INSTRUCTION})
 class MMEBDatasetProcessor(BaseDatasetProcessor):
     def __init__(self, 
                  model_args, 
                  data_args, 
                  training_args, 
                  processor, 
+                 instruction,
                  **dataset_config):
         
-        super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, processor, 
+        super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, processor, instruction,
                          query_key_text="qry",
                          query_key_mm="qry_image_path",
                          cand_key_text="pos_text",
                          cand_key_mm="pos_image_path",
                          **dataset_config)
-
-    # def _add_signature_columns_map_func(self, batch_dict):
-    #     signature_columns = {
-    #         "query_key_text": batch_dict['qry'],
-    #         "query_key_mm": batch_dict['qry_image_path'],
-    #         "target_key_text": batch_dict['pos_text'],
-    #         "target_key_mm": batch_dict['pos_image_path']}
-    #     return batch_dict | signature_columns
-
-def load_mmeb_dataset(model_args, data_args, training_args, processor, *args, **kwargs):
-    dataset_name = kwargs.get("dataset_name", DATASET_PARSER_NAME)
-    subset_name = kwargs.get("subset_name")
-    dataset_split = kwargs.get("dataset_split", "original")
-    dataset = load_dataset(dataset_name, subset_name, split=f"{dataset_split}")
-    column_names = dataset.column_names
-    num_sample_per_subset = kwargs.get("num_sample_per_subset", getattr(data_args, "num_sample_per_subset", None))
-    if num_sample_per_subset is not None and num_sample_per_subset < dataset.num_rows:
-        num_rows = int(num_sample_per_subset)
-        dataset = dataset.select(range(num_rows))
-    num_rows = dataset.num_rows
-    num_shards = training_args.dataloader_num_workers if training_args.dataloader_num_workers > 0 else 1
-    dataset = dataset.to_iterable_dataset(num_shards=num_shards)  # convert to IterableDataset and multiple shards
-
-    query_descriptions = target_descriptions = None
-    if data_args.query_description_dir is not None and kwargs.get("insert_query_description", True):
-         desc_path = os.path.join(data_args.query_description_dir, subset_name, "cot", "query.pkl")
-         if os.path.exists(desc_path):
-            with open(desc_path, "rb") as f:
-                query_descriptions = pickle.load(f)
-
-    if data_args.target_description_dir is not None and kwargs.get("insert_target_description", True):
-        desc_path = os.path.join(data_args.target_description_dir, subset_name, "cot", "target.pkl")
-        if os.path.exists(desc_path):
-            with open(desc_path, "rb") as f:
-                target_descriptions = pickle.load(f)
-    
-    kwargs['query_descriptions'] = query_descriptions
-    kwargs['target_descriptions'] = target_descriptions
-    kwargs['model_backbone'] = model_args.model_backbone
-    kwargs['image_resolution'] = data_args.image_resolution
-    kwargs['global_dataset_name'] = f'{DATASET_PARSER_NAME}/{subset_name}'
-    remove_columns = ['qry', 'qry_image_path', 'pos_image_path']
-    if 'neg_image_path' in column_names:
-        remove_columns.append('neg_image_path')
-
-    format_fn = partial(data_prepare, data_args=data_args, model_args=model_args, processor=processor, **kwargs)
-    dataset = dataset.map(lambda x:
-                          format_fn(x), batched=True, batch_size=2048,
-                          remove_columns=remove_columns, drop_last_batch=True)
-
-    if model_args.do_sft_target and not model_args.do_cl and target_descriptions is not None:
-        target_dataset = dataset.map(lambda row: {
-            "query_text": row["pos_text"],
-            "query_image": row["pos_image"],
-            "pos_text": row["pos_text"],
-            "pos_image": row["pos_image"], 
-            "neg_text": row["neg_text"],
-            "neg_image": row['neg_image'],
-            "global_dataset_name": row["global_dataset_name"],
-        }, batched=False, num_proc=None)
-        dataset = datasets.concatenate_datasets([dataset, target_dataset])
-
-        num_rows *= 2
-
-    # if query_descriptions is not None:
-    #     query_descriptions_column = [format_description(query_descriptions.get((row[qry_text_field], row[qry_image_field]), None), data_args.use_cot) for row in dataset]
-    # else:
-    #     query_descriptions_column = [None] * len(dataset)
-    # dataset = dataset.add_column("query_description", query_descriptions_column)
-    # if target_descriptions is not None:
-    #     target_descriptions_column = [format_description(target_descriptions.get((row[tgt_text_field], row[tgt_image_field]), None), data_args.use_cot) for row in dataset]
-    # else:
-    #     target_descriptions_column = [None] * len(dataset)
-    # dataset = dataset.add_column("target_description", target_descriptions_column)
-
-
-    # dataset = dataset.shuffle(buffer_size=10_000, seed=42)
-    # dataset = dataset._resolve_features()
-    # features = _infer_features_from_batch(dataset._head()) # not working: {ArrowInvalid}ArrowInvalid('Could not convert <PIL.Image.Image image mode=RGB size=128x128 at 0x7F7C794E9BD0> with type Image: did not recognize Python value type when inferring an Arrow data type')
-    dataset = dataset.cast(MULTIMODAL_FEATURES)
-    print_master(f"Loaded {DATASET_PARSER_NAME}/{subset_name} dataset with {num_rows} samples")
-
-    # num_rows in iterable_dataset is overridden, set it here for printing dataset stats
-    setattr(dataset, 'num_rows', num_rows)
-
-    return dataset
-
-
-class TrainTextImageDataset(Dataset):
-    def __init__(self, data_args, model_args):
-        self.data_args = data_args
-        self.model_args = model_args
-        train_data = []
-        print_rank(f"Loading {len(data_args.subset_name)} datasets: {data_args.subset_name}")
-        for subset in data_args.subset_name:
-            subset_data = load_dataset(
-                self.data_args.dataset_name, subset,
-                split=f"{self.data_args.dataset_split}[:{data_args.num_sample_per_subset}]",
-            )
-            train_data.append(subset_data)
-        self.train_data = concatenate_datasets(train_data)
-
-    def __len__(self):
-        return len(self.train_data)
-
-    def _get_image(self, img_path):
-        if not img_path:
-            return None
-        full_img_path = os.path.join(self.data_args.image_dir, img_path)
-        image = Image.open(full_img_path)
-        backbone = self.model_args.model_backbone
-        if backbone != PHI3V and self.data_args.image_resolution:
-            return process_image(image, self.data_args.image_resolution)
-        else:
-            return image
-
-    def __getitem__(self, data_idx) -> Tuple[str, List[str]]:
-        qry_texts, qry_image_paths, pos_texts, pos_image_paths = (
-            self.train_data[data_idx]["qry"], self.train_data[data_idx]["qry_image_path"],
-            self.train_data[data_idx]["pos_text"], self.train_data[data_idx]["pos_image_path"]
-        )
-        if 'neg_text' in self.train_data.column_names:
-            neg_texts, neg_image_paths = self.train_data[data_idx]["neg_text"], self.train_data[data_idx]["neg_image_path"]
-        else:
-            neg_texts, neg_image_paths = [''] * len(data_idx), [] * len(data_idx)
-        if isinstance(data_idx, int):
-            qry_texts = [qry_texts]
-            qry_image_paths = [qry_image_paths]
-            pos_texts = [pos_texts]
-            pos_image_paths = [pos_image_paths]
-            neg_texts = [neg_texts]
-            neg_image_paths = [neg_image_paths]
-        _qry_texts, _qry_images, _pos_texts, _pos_images, _neg_texts, _neg_images = [], [], [], [], [], []
-        backbone = self.model_args.model_backbone
-        for qry_text, qry_image_path, pos_text, pos_image_path, neg_text, neg_image_path \
-            in zip(qry_texts, qry_image_paths, pos_texts, pos_image_paths, neg_texts, neg_image_paths):
-            # instructions were hardcoded with Phi3 image special tokens
-            # Update image token for llava and colqwen2
-            if backbone != PHI3V:
-                qry_text = qry_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[backbone])
-                pos_text = pos_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[backbone])
-                neg_text = neg_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[backbone]) if neg_text else None
-            qry_image = self._get_image(qry_image_path)
-            pos_image = self._get_image(pos_image_path)
-            neg_image = self._get_image(neg_image_path) if neg_image_path else None
-            if (not qry_text and not qry_image) or (not pos_text and not pos_image):
-                print("empty inputs")
-                continue
-            _qry_texts.append(qry_text)
-            _qry_images.append(qry_image)
-            _pos_texts.append(pos_text)
-            _pos_images.append(pos_image)
-            _neg_texts.append(neg_text)
-            _neg_images.append(neg_image)
-
-        return {"query_text": _qry_texts, "query_image": _qry_images,
-                "pos_text": _pos_texts, "pos_image": _pos_images,
-                "neg_text": _neg_texts, "neg_image": _neg_images}
-
-
-class EvalDataset(Dataset):
-    def __init__(self, data_args, model_args, subset, text_field, img_path_field):
-        """
-        (text_field, image_field) -> ("qry_text", "qry_img_path") or ("tgt_text", "tgt_img_path")
-        """
-        self.data_args = data_args
-        self.model_args = model_args
-        self.backbone = self.model_args.model_backbone
-
-        self.eval_data = load_dataset(
-            self.data_args.dataset_name,
-            subset,
-            split=self.data_args.dataset_split,
-        )
-        self.paired_data = self.get_paired_data(text_field, img_path_field)
-        self.paired_dataset = datasets.Dataset.from_dict({
-            "text": [pair["text"] for pair in self.paired_data],
-            "img_path": [pair["img_path"] for pair in self.paired_data]
-        })
-
-    def __len__(self):
-        return len(self.paired_dataset)
-
-    def __getitem__(self, item):
-        text, img_path = self.paired_dataset[item]["text"], self.paired_dataset[item]["img_path"]
-        if self.backbone != PHI3V:
-            text = text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[self.backbone])
-
-        return text, self._get_image(img_path)
-
-    def _process_image(self, image, resolution):
-        if image is None:
-            return None
-        if resolution == "high":
-            image = image.resize((1344, 1344))
-        else:
-            image = image.resize((336, 336))
-        return image
-
-    def _get_image(self, img_path):
-        if img_path == "":
-            return None
-        full_img_path = os.path.join(self.data_args.image_dir, img_path)
-        image = Image.open(full_img_path)
-        if self.model_args.model_backbone != PHI3V and self.data_args.image_resolution:
-            return process_image(image, self.data_args.image_resolution)
-        else:
-            return image
-        return image
-
-    def get_paired_data(self, text_field, img_path_field):
-        """
-        (text_field, image_field) -> ("qry_text", "qry_img_path") or ("tgt_text", "tgt_img_path")
-        """
-        unique_set = set()
-        unique_pairs = []  # to preserve the original order
-        for row in self.eval_data:
-            if isinstance(row[text_field], str):
-                if row[text_field]:
-                    if (row[text_field], row[img_path_field]) not in unique_set:
-                        unique_pairs.append((row[text_field], row[img_path_field]))
-                        unique_set.add((row[text_field], row[img_path_field]))
-                else:
-                    if isinstance(row[img_path_field], List):
-                        for img_path in row[img_path_field]:
-                            unique_pairs.append((row[text_field], img_path))
-                    else:
-                        unique_pairs.append((row[text_field], row[img_path_field]))
-            elif type(row[text_field]) == list:
-                assert type(row[img_path_field]) == list and len(row[img_path_field]) == len(row[text_field])
-                for text, img_path in zip(row[text_field], row[img_path_field]):
-                    if (text, img_path) not in unique_set:
-                        unique_pairs.append((text, img_path))
-                        unique_set.add((text, img_path))
-
-        paired_data = [{"text": text, "img_path": img_path} for text, img_path in unique_pairs]
-        return paired_data
-
-
-class FlickrDataset(Dataset):
-    def __init__(self, modality, model_backbone):
-        self.model_backbone = model_backbone
-        self.modality = modality
-        self.raw_data = load_dataset("nlphuji/flickr_1k_test_image_text_retrieval", split="test")
-        if modality == "image":
-            self.eval_data, self.image_names = self.get_image_data()
-        else:
-            self.eval_data, self.image_names = self.get_text_data()
-
-    def __len__(self):
-        return len(self.eval_data)
-
-    def __getitem__(self, idx):
-        return self.eval_data[idx]
-
-    def __getitem__(self, idx):
-        text, image = self.eval_data[idx]
-        if self.backbone != PHI3V:
-            text = text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[self.backbone])
-            if self.data_args.image_resolution:
-                image = process_image(image, self.data_args.image_resolution)
-        return text, image
-
-    def _process_image(self, image, resolution):
-        if image is None:
-            return None
-        if resolution == "high":
-            image = image.resize((1344, 1344))
-        else:
-            image = image.resize((336, 336))
-        return image
-
-    def _get_image(self, img_path):
-        if img_path == "":
-            return None
-        full_img_path = os.path.join(self.data_args.image_dir, img_path)
-        image = Image.open(full_img_path)
-        if self.model_backbone != PHI3V:
-            return process_image(image, self.data_args.image_resolution)
-        else:
-            return image
-        return image
-
-    def get_image_data(self):
-        eval_data, image_names = [], []
-        # i2t
-        inst = "<|image_1|> Find an image caption describing the given image."  # llava-1344-step1k4, i2t=94.0, t2i=80.26
-        # inst = "<|image_1|> Represent the given image for image caption retrieval."  # llava-1344-step1k4, i2t=94.6, t2i=78.98
-        # t2i
-        # inst = "<|image_1|> Represent the given image."  # MSCOCO t2i
-
-        for row in self.raw_data:
-            eval_data.append((inst, row["image"]))
-            image_names.append(row["filename"])
-        return eval_data, image_names
-
-    def get_text_data(self):
-        eval_data, image_names = [], []
-        # i2t
-        inst = ""
-        # t2i
-        # inst = "Retrieve an image that matches the given caption: "
-        # inst = "Find me an everyday image that matches the given caption."  # MSCOCO t2i
-        for row in self.raw_data:
-            for caption in row["caption"]:
-                # eval_data.append((caption, None))
-                eval_data.append((inst + caption, None))
-                image_names.append(row["filename"])
-        return eval_data, image_names
