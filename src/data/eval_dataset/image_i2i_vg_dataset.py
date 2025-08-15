@@ -8,10 +8,10 @@ from ..loader.mixed_dataset import AutoPairDataset
 DATASET_PARSER_NAME = "image_i2i_vg"
 @AutoPairDataset.register(DATASET_PARSER_NAME)
 @AutoPairDataset.register_instruction(["MSCOCO", "Visual7W-Pointing", "RefCOCO"],
-    {'query': """Given an image and a query, identify the object or region in the image that the query refers to, and generate a concise description of the object or region.\n\nQuery: {query}\n\nEmbed the object with the answer.""",
+    {'query': """Given an image and a query, identify the object or region in the image that the query refers to, and generate a concise description of the object or region.\n\nQuery: {text}\n\nEmbed the object with the answer.""",
     'target': IMAGE_EMBED_INSTRUCTION})
 @AutoPairDataset.register_instruction(["RefCOCO-Matching"],
-    {'query': """Given an image and a query, identify the object or region in the image that the query refers to, and generate a concise description of the object or region.\n\nQuery: {query}\n\nEmbed the object with the answer.""",
+    {'query': """Given an image and a query, identify the object or region in the image that the query refers to, and generate a concise description of the object or region.\n\nQuery: {text}\n\nEmbed the object with the answer.""",
     'target': TEXT_EMBED_INSTRUCTION })
 class ImageI2IVGEvalDatasetProcessor(MMEBEvalDatasetProcessor):
     def __init__(self, *args, **dataset_config):

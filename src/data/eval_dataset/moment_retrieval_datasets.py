@@ -15,7 +15,7 @@ TASK_INST_TGT = "" # "Understand the content of the provided video."
 DATASET_PARSER_NAME = "moment_retrieval"
 @AutoPairDataset.register(DATASET_PARSER_NAME)
 @AutoPairDataset.register_instruction(["QVHighlight", "Charades-STA"],
-    {'query': """Given a video and a query, identify the clip in the video that best matches the query.\n\nQuery: {query}\n\nEmbed the clip with your answer.""",
+    {'query': """Given a video and a query, identify the clip in the video that best matches the query.\n\nQuery: {text}\n\nEmbed the clip with your answer.""",
      'target': VIDEO_EMBED_INSTRUCTION})
 
 class MomentRetrievalEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):

@@ -18,7 +18,7 @@ TASK_INST_TGT = "" # "Understand the content of the provided video clip."
 DATASET_PARSER_NAME = "momentseeker"
 @AutoPairDataset.register(DATASET_PARSER_NAME)
 @AutoPairDataset.register_instruction("MomentSeeker",
-    {'query': """Given a video and a query, identify the clip in the video that best matches the query.\n\nQuery: {query}\n\nEmbed the clip with your answer.""",
+    {'query': """Given a video and a query, identify the clip in the video that best matches the query.\n\nQuery: {text}\n\nEmbed the clip with your answer.""",
      'target': VIDEO_EMBED_INSTRUCTION})
 class MomentSeekerEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self, *args,**dataset_config):

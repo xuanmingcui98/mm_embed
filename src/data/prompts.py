@@ -13,7 +13,7 @@ import re
 
 
 IMAGE_TASKS = {'ImageNet-1K', "ImageNet_1K", 'N24News', 'HatefulMemes', 'VOC2007', 'SUN397', 'A-OKVQA', 'MSCOCO', 'Place365', 'ImageNet-A', 'ImageNet-R', 'ObjectNet', 'Country211', 'OK-VQA', 'RefCOCO', 'DocVQA', 'InfographicsVQA', 'ChartQA', 'NIGHTS', 'FashionIQ', 'ScienceQA', 'Visual7W', 'VizWiz', 'GQA', 'TextVQA', 'VisDial', 'CIRR', 'VisualNews_t2i', 'VisualNews_i2t', 'MSCOCO_t2i', 'MSCOCO_i2t', 'Wiki-SS-NQ', 'WebQA', 'OVEN', 'EDIS', 'RefCOCO-Matching', 'Visual7W-Pointing'}
-VIDEO_TASKS = {"video_caption_300k", "video_qa_240k", "video_caption_300k-video", # train
+VIDEO_TASKS = {"video_caption_300k-v2t", "video_qa_240k", "video_caption_300k-t2v", # train
                'SmthSmthV2', 'HMDB51', 'UCF101', 'Kinetics-700', 'Breakfast', 'MSR-VTT', 'MSVD', 'DiDeMo', 'YouCook2', 'VATEX', 'QVHighlight', 'Charades-STA', 'MomentSeeker', 'Video-MME', 'NExTQA', 'EgoSchema', 'MVBench', 'ActivityNetQA'}
 VISDOC_TASKS = {"openbmb/VisRAG-Ret-Train-In-domain-data", "vidore/colpali_train_set",
                 'ViDoRe_arxivqa', 'ViDoRe_docvqa', 'ViDoRe_infovqa', 'ViDoRe_tabfquad', 'ViDoRe_tatdqa', 'ViDoRe_shiftproject', 'ViDoRe_syntheticDocQA_artificial_intelligence', 'ViDoRe_syntheticDocQA_energy', 'ViDoRe_syntheticDocQA_government_reports', 'ViDoRe_syntheticDocQA_healthcare_industry', 'VisRAG_ArxivQA', 'VisRAG_ChartQA', 'VisRAG_MP-DocVQA', 'VisRAG_SlideVQA', 'VisRAG_InfoVQA', 'VisRAG_PlotQA', 'ViDoSeek-page', 'ViDoSeek-doc', 'MMLongBench-doc', 'MMLongBench-page'}
@@ -39,9 +39,9 @@ TEXT_EMBED_INSTRUCTION  = """Embed the following text:\n\n{text}"""
 IMAGE_EMBED_INSTRUCTION = """Given the image, generate a detailed description.\n\nEmbed the image with the description."""
 VISDOC_EMBED_INSTRUCTION = """Given the document image, generate a detailed description of the document.\n\nEmbed the document image with the description."""
 VIDEO_EMBED_INSTRUCTION = """Given the video, generate a detailed description of the video.\n\nEmbed the video with the description."""
-VIDEO_QA_INSTRUCTION = """Given the video and the below question, answer the question based on the video.\n\nQuestion: {query}\n\nEmbed your answer."""
-IMAGE_QA_INSTRUCTION = """Given the image and the below question, answer the question based on the image.\n\nQuestion: {query}\n\nEmbed your answer."""
-VISDOC_QA_RETRIEVAL_INSTRUCTION = """Given a question, determine the visual document that would help answer the question.\n\nQuestion: {query}\n\nEmbed your answer."""
+VIDEO_QA_INSTRUCTION = """Given the video and the below question, answer the question based on the video.\n\nQuestion: {text}\n\nEmbed your answer."""
+IMAGE_QA_INSTRUCTION = """Given the image and the below question, answer the question based on the image.\n\nQuestion: {text}\n\nEmbed your answer."""
+VISDOC_QA_RETRIEVAL_INSTRUCTION = """Given a question, determine the visual document that would help answer the question.\n\nQuestion: {text}\n\nEmbed your answer."""
 
 
 def format_description(description, prompt_format="gt_only"):
@@ -91,7 +91,7 @@ def extract_query(qry, subset):
     elif subset in TASK_TYPE["classification"] or subset in {"NIGHTS", "MSCOCO_i2t", "VisualNews_i2t"}:
         return None
     else:
-        raise ValueError(f"Unknown subset: {subset}")
+        return qry
 
 
 def extract_target(text, subset):

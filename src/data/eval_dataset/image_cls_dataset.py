@@ -17,7 +17,7 @@ DATASET_PARSER_NAME = "image_cls"
     {'query': """Given an image, identify the scene it depicts.\n\nEmbed your answer.""",
    'target': TEXT_EMBED_INSTRUCTION })
 @AutoPairDataset.register_instruction("N24News",
-    {'query': """Given an image and the below news text, identify the main domain of the news.\n\nNews text: {query}\n\nEmbed your answer.""",
+    {'query': """Given an image and the below news text, identify the main domain of the news.\n\nNews text: {text}\n\nEmbed your answer.""",
    'target': TEXT_EMBED_INSTRUCTION })
 class ImageClsEvalDatasetProcessor(MMEBEvalDatasetProcessor):
     def __init__(self, *args, **dataset_config):

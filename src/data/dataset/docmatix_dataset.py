@@ -5,9 +5,9 @@ from PIL import Image
 from datasets.features.image import image_to_bytes
 import io
 
-from ..dataset.base_pair_dataset import AutoPairDataset, add_metainfo_hook, MULTIMODAL_FEATURES, \
-    RESOLUTION_MAPPING
+from ..dataset.base_pair_dataset import  MULTIMODAL_FEATURES, RESOLUTION_MAPPING
 from src.model.processor import VLM_IMAGE_TOKENS
+from ..loader.mixed_dataset import AutoPairDataset, add_metainfo_hook
 
 
 DOCMATIX_QUERY_PROMPT = "Given the question below, retrieve the most relevant PDF document that can help answer it:\n: "

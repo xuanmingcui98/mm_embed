@@ -20,7 +20,7 @@ def process_query(query, prompt, video_token=''):
 # TASK_INST_TGT = "Represent the following text:\n"
 TASK_INST_QRY = ""
 TASK_INST_TGT = ""
-
+    
 OPTIONS = ['A', 'B', 'C', 'D']
 
 DATASET_PARSER_NAME = "videomme"

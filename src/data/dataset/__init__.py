@@ -19,19 +19,19 @@
 
 from .mmeb_dataset import MMEBDatasetProcessor
 # from .mmeb_dataset_orig import load_mmeb_dataset
-from .docmatix_dataset import load_docmatix_dataset
+# from .docmatix_dataset import load_docmatix_dataset
 from .visrag_dataset import VisragDatasetProcessor
 from .vidore_dataset import VideoDatasetProcessor
 from .llavahound_dataset_caption import LLaVaHoundCaptionDatasetProcessor
 from .llavahound_dataset_qa import LLaVaHoundQADatasetProcessor
-from .beir_dataset import BEIRDatasetProcessor
-from .berri import load_berri
-from .mteb_training import load_mteb_training
-from .mteb_cluster import load_mteb_cluster
-from .gui_dataset import load_gui_dataset
-from .pixmo import load_pixmo_dataset
-from .msrvtt_dataset import MSRVTTDatasetProcessor
-from .msvd_dataset import MSRVDatasetProcessor
-from .didemo_dataset import DiDeMoDatasetProcessor
-from .cls_dataset import VideoClassificationDatasetProcessor
-from .ssv2_dataset import SSV2DatasetProcessor  
+# from .beir_dataset import BEIRDatasetProcessor
+# from .berri import load_berri
+# from .mteb_training import load_mteb_training
+# from .mteb_cluster import load_mteb_cluster
+# from .gui_dataset import load_gui_dataset
+# from .pixmo import load_pixmo_dataset
+# from .msrvtt_dataset import MSRVTTDatasetProcessor
+# from .msvd_dataset import MSRVDatasetProcessor
+# from .didemo_dataset import DiDeMoDatasetProcessor
+# from .cls_dataset import VideoClassificationDatasetProcessor
+# from .ssv2_dataset import SSV2DatasetProcessor  

@@ -89,11 +89,11 @@ class BaseDatasetProcessor:
         self.dataset_config = dataset_config
         self.data_parser_name = data_parser_name
 
-        self.dataset_name = self.dataset_config.get("subset_name", self.dataset_name)
+        self.dataset_name = self.dataset_config.get("dataset_name")
         self.dataset_split = self.dataset_config.get("dataset_split", "original")
-        self.image_dir = self.dataset_config.get('image_dir', None)
+        self.image_dir = self.dataset_config.get('image_dir')
         self.model_backbone = self.model_args.model_backbone
-        self.image_resolution = self.dataset_config.get('image_resolution', None)
+        self.image_resolution = self.dataset_config.get('image_resolution')
         self.instruction = instruction
 
         self.query_key_text = query_key_text
@@ -123,7 +123,6 @@ class BaseDatasetProcessor:
 
         self.dataset_config['global_dataset_name'] = f'{self.data_parser_name}/{self.dataset_name}'
         self.dataset_config['model_backbone'] = self.model_args.model_backbone
-        self.dataset_config['dataset_name'] = self.dataset_name
 
         self.dataset = self._load_hf_dataset()
         # self.add_signature_columns()
@@ -195,7 +194,7 @@ class BaseDatasetProcessor:
             May be implemented by subclasses.
         """
 
-        dataset = load_dataset(self.dataset_name, self.dataset_name, split=f"{self.dataset_split}")
+        dataset = load_dataset(self.dataset_name, self.dataset_config['subset_name'], split=f"{self.dataset_split}")
 
         return dataset
 
@@ -219,19 +218,17 @@ class BaseDatasetProcessor:
             instruction = self.instruction['target'] if self.instruction is not None else None
 
         text = extract_fn(text, self.dataset_name)
-        if instruction is not None:
-            text = instruction.format(text=text)
-
         # make sure no extra visual tokens are left in the text
         text = text.replace(VLM_IMAGE_TOKENS[self.model_backbone], "")
         text = text.replace(VLM_VIDEO_TOKENS[self.model_backbone], "").strip()
 
+        if instruction is not None:
+            text = instruction.format(text=text)
+
+
         description = format_description(desc[key], self.data_args.use_cot) if (desc is not None and key is not None) else ""
 
-        formatted_sample = [
-            {"role": "system",
-            "content": [{"type": "text", "text": "You are a helpful assistant."}],}
-        ]
+        formatted_sample = []
         user_content = [] 
         if image_path:
             user_content.append({"type": "image", "image": image_path})

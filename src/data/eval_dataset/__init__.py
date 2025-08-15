@@ -17,7 +17,7 @@ from .msvd_dataset import MSVDEvalDatasetProcessor
 from .youcook2_dataset import YouCook2EvalDatasetProcessor
 from .vatex_dataset import VatexEvalDatasetProcessor
 
-from .gui_dataset import GuiEvalDatasetProcessor
+# from .gui_dataset import GuiEvalDatasetProcessor
 
 # Temporal Grounding
 from .moment_retrieval_datasets import MomentRetrievalEvalDatasetProcessor

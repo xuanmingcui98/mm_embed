@@ -6,14 +6,14 @@ from functools import wraps
 from datasets.distributed import split_dataset_by_node
 from datasets import concatenate_datasets
 from ..dataset.hf_datasets import interleave_datasets
-from ..prompts import IMAGE_TASKS, TASK_TYPE
+from ..prompts import TASK2ID
 from src.utils import print_master
 import torch
 
 class AutoPairDataset(metaclass=ABCMeta):
     # Base class for auto datasets.
     registry = {}
-    instruction_registry = defaultdict(None)
+    instruction_registry = defaultdict(lambda: None)
 
     def __init_subclass__(cls):
         if cls.__name__ not in AutoPairDataset.registry:
@@ -31,7 +31,9 @@ class AutoPairDataset(metaclass=ABCMeta):
     @classmethod
     def instantiate(cls, dataset_parser, *args, **kwargs):
         try:
-            if kwargs.get("dataset_name") is not None:
+            if kwargs.get("subset_name") is not None:
+                instruction = cls.instruction_registry[kwargs["subset_name"]]
+            elif kwargs.get("dataset_name") is not None:
                 instruction = cls.instruction_registry[kwargs["dataset_name"]]
             else:
                 instruction = cls.instruction_registry[dataset_parser]
@@ -54,13 +56,18 @@ class AutoPairDataset(metaclass=ABCMeta):
         """
         Register the instruction for the dataset.
         """
-        if isinstance(dataset_name, str):
-            dataset_name = [dataset_name]
-        for name in dataset_name:
-            if name in cls.instruction_registry:
-                print(f"[Alert] AutoPairDataset: a instruction in the same name ({name}) has been registered")
+        def inner_wrapper(wrapped_class):
+            if isinstance(dataset_name, str):
+                dataset_names = [dataset_name]
             else:
-                cls.instruction_registry[name] = instruction
+                dataset_names = dataset_name
+            for name in dataset_names:
+                if name in cls.instruction_registry:
+                    print(f"[Alert] AutoPairDataset: a instruction in the same name ({name}) has been registered")
+                else:
+                    cls.instruction_registry[name] = instruction
+            return wrapped_class
+        return inner_wrapper
 
 def add_metainfo_hook(f):
     """
@@ -74,6 +81,7 @@ def add_metainfo_hook(f):
         batch_size = len(batch_data.get('query_text', batch_data.get('cand_text', [])))
         global_dataset_name = kwargs.get("global_dataset_name", "None")
         batch_data['global_dataset_name'] = [global_dataset_name] * batch_size
+        batch_data['task_id'] = [TASK2ID[kwargs.get("subset_name", kwargs.get("dataset_name"))]] * batch_size
         return batch_data
 
     return wrapper

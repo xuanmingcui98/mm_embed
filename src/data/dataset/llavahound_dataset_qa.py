@@ -20,7 +20,7 @@ TASK_INST_TGT = "" # "Represent the following text:\n"
 DATASET_PARSER_NAME = "llavahound_qa"
 @AutoPairDataset.register(DATASET_PARSER_NAME)
 @AutoPairDataset.register_instruction("video_qa_240k",
-    {'query': """Given a video and the below question, answer the question based on the video.\n\nQuestion: {query}\n\nEmbed your answer.""",
+    {'query': """Given a video and the below question, answer the question based on the video.\n\nQuestion: {text}\n\nEmbed your answer.""",
     'target': TEXT_EMBED_INSTRUCTION})
 class LLaVaHoundQADatasetProcessor(VideoDatasetProcessor):
     def __init__(self, *args, **dataset_config):

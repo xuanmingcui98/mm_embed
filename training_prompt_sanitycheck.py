@@ -78,7 +78,7 @@ def main():
             print(f"Target: {row['pos_text']}")
             prompts[row['global_dataset_name']] = (row['query_text'], row['pos_text'])
 
-    filename = "training_prompts"
+    filename = "training_prompts_unified"
     if data_args.apply_chat_template:
         filename += "_chat"
     json.dump(prompts, open(f"{filename}.json", 'w'), indent=4)
