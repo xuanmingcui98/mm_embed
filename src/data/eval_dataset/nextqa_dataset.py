@@ -36,19 +36,9 @@ class NextQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         super().__init__(DATASET_PARSER_NAME, *args,
                         query_key_text='question', query_key_mm='video', cand_key_text="cand_key_text", cand_key_mm=None,
                          **dataset_config)
-
-    def _add_signature_columns_map_func(self, batch_dict):
-        signature_columns = {
-
-            "cand_key_text": [[a0, a1, a2, a3, a4][answer] for answer, a0, a1, a2, a3, a4 in \
-                              zip(batch_dict['answer'], batch_dict['a0'], batch_dict['a1'], batch_dict['a2'], batch_dict['a3'], batch_dict['a4'])]}
-            
-        return batch_dict | signature_columns
-
-
+        
     def _load_hf_dataset(self):
         dataset = load_dataset(DATASET_HF_PATH, "MC", split="test")
-        dataset = dataset.map(self._add_signature_columns_map_func, batched=True, num_proc=4, load_from_cache_file=False)
         return dataset, None
 
 

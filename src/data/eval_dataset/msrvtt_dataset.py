@@ -54,7 +54,8 @@ class MSRVTTEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         query_text  = process_input_text(TASK_INST_QRY, model_backbone, text=caption)
         query_image = None
 
-        # Candidate: video frames as image dict + generic target text
+        target_description = self.target_descriptions[(video_name,)] if self.target_descriptions else None
+
         cand_text = [process_input_text(TASK_INST_TGT, model_backbone, add_video_token=True)]
         cand_image = [{
             "bytes": [None] * len(frame_paths),
@@ -73,4 +74,6 @@ class MSRVTTEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "cand_text": cand_text,
             "cand_image": cand_image,
             "dataset_infos": dataset_info,
+            "query_description": None,
+            "target_description": target_description,
         }

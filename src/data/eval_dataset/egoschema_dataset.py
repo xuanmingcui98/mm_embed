@@ -18,7 +18,7 @@ def process_query(query, prompt, video_token=''):
     return query
 
 
-TASK_PROMPT = "Given a video and a question, select the most accurate answer from the provided candidates. Return only the exact text of your chosen answer. Question: "
+TASK_PROMPT = "" # "Given a video and a question, select the most accurate answer from the provided candidates. Return only the exact text of your chosen answer. Question: "
 OPTIONS = ['A', 'B', 'C', 'D']
 
 DATASET_PARSER_NAME = "egoschema"
@@ -48,14 +48,14 @@ class EgoSchemaEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
 
         # Pull this sample's fields
         video_idx    = batch_dict["video_idx"][data_idx]
-        query        = batch_dict["question"][data_idx]
+        question     = batch_dict["question"][data_idx]
         answer_idx   = int(batch_dict["answer"][data_idx])
         question_idx = batch_dict["question_idx"][data_idx]
         options      = batch_dict["option"][data_idx]
 
         # Build query text (original concatenates options into the prompt)
         query = process_query(
-            query + " " + " ".join(options),
+            question + " " + " ".join(options),
             prompt=TASK_PROMPT,
             video_token=VLM_VIDEO_TOKENS[model_backbone],
         )
@@ -100,6 +100,10 @@ class EgoSchemaEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         cand_text  = [o[o.find(". "):].strip(". ") for o in options]  # mirrors original slicing
         cand_image = [None] * len(options)
 
+        query_description = target_description = None
+        if self.query_descriptions:
+            query_description = self.query_descriptions[(question, video_idx)]
+
         dataset_info = {
             "question_id": question_idx,
             "video_id": video_idx,
@@ -117,4 +121,6 @@ class EgoSchemaEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "cand_text": cand_text,     # list[str]
             "cand_image": cand_image,   # list[None], zipped with cand_text
             "dataset_infos": dataset_info,
+            "query_description": query_description,
+            "target_description": target_description,
         }

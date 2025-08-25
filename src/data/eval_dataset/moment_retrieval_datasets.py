@@ -98,6 +98,7 @@ class MomentRetrievalEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                             max_frames_saved=max_clip_frames_saved
                         )
 
+            target_description = []
             # Collect candidate clips from frames_dir
             if os.path.exists(frames_dir):
                 for entry in os.listdir(frames_dir):
@@ -115,7 +116,9 @@ class MomentRetrievalEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                         "paths": frame_paths,
                         "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)] * len(frame_paths),
                     })
-                    cand_clip_names.append(clip_dir_abs)
+                    cand_clip_names.append(clip_dir_abs) 
+                    if self.target_descriptions:
+                        target_description.append(self.target_descriptions[(os.path.join(video_name, entry),)])
 
                 # Text for each candidate (parent will handle chat-template if enabled)
                 if len(cand_clip_names) > 0:
@@ -135,6 +138,7 @@ class MomentRetrievalEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             }
 
         query_text = process_input_text(TASK_INST_QRY, model_backbone, text=query_text_raw, add_video_token=True)
+        query_description = self.query_descriptions[(query_text_raw, query_frame_dir)] if self.query_descriptions else None
 
         return {
             "query_text": query_text,
@@ -142,4 +146,6 @@ class MomentRetrievalEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "cand_text": cand_text,       # list[str], len == num candidates
             "cand_image": cand_image,     # list[dict], aligned with cand_text
             "dataset_infos": dataset_infos,
+            "query_description": query_description,
+            "target_description": target_description,  # list[str] for each candidate
         }

@@ -5,7 +5,7 @@ from datasets.features.image import image_to_bytes
 from torch.jit import isinstance
 from ..dataset.base_pair_dataset import RESOLUTION_MAPPING, VideoDatasetProcessor
 from src.model.processor import VLM_IMAGE_TOKENS
-from ..prompts import TEXT_EMBED_INSTRUCTION
+from ..prompts import TEXT_EMBED_INSTRUCTION, IMAGE_QA_INSTRUCTION
 from ..loader.mixed_dataset import AutoPairDataset
 
 
@@ -21,15 +21,11 @@ TASK_INST_TGT = "" #"Represent the following text:\n"
 DATASET_PARSER_NAME = "vidore"
 @AutoPairDataset.register(DATASET_PARSER_NAME)
 @AutoPairDataset.register_instruction("vidore",
-    {'query': """Given the image, answer the question based on the image.\n\nEmbed your answer.""",
+    {'query': IMAGE_QA_INSTRUCTION,
      'target': TEXT_EMBED_INSTRUCTION})
 class VidoReDatasetProcessor(VideoDatasetProcessor):
     def __init__(self, *args, **dataset_config):
-        super().__init__(DATASET_PARSER_NAME, *args, **dataset_config,
-                         query_key_text="query",
-                         query_key_mm="image_filename",
-                         cand_key_text="answer",
-                         cand_key_mm=None)
+        super().__init__(DATASET_PARSER_NAME, *args, **dataset_config)
 
     def _load_hf_dataset(self):
         kwargs = self.dataset_config
@@ -61,14 +57,20 @@ class VidoReDatasetProcessor(VideoDatasetProcessor):
             path = image['path']
         else:
             raise ValueError(f"Unsupported image type: {type(image)}")
+        
+        query_description = target_description = None
+        if self.query_descriptions is not None:
+            query_description = self.query_descriptions[(query, image_filename, answer)]
+        if self.target_descriptions is not None:
+            target_description = self.target_descriptions[(query, image_filename, answer)]
 
-        if self.data_args.apply_chat_template:
-            answer = TASK_INST_TGT + answer
         return {
             "query_text": query,
             "query_image": {"bytes": [image_bytes], "paths": [path], "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]},
             "pos_text": answer,
             "pos_image": None,
             "neg_text": "",
-            "neg_image": None
+            "neg_image": None,
+            "query_description": query_description,
+            "target_description": target_description,
         }

@@ -3,12 +3,12 @@ import os
 from datasets import Dataset
 from src.data.dataset_hf_path import EVAL_DATASET_HF_PATH
 from src.data.eval_dataset.base_eval_dataset import RESOLUTION_MAPPING, MMEBV2EvalDatasetProcessor
-from src.data.utils.dataset_utils import load_hf_dataset
 from src.data.eval_dataset.video_classification_utils import DATASET_INSTRUCTION
 from src.data.utils.vision_utils import save_frames, process_video_frames
 from src.model.processor import process_input_text
 from ..prompts import TEXT_EMBED_INSTRUCTION
 from ..loader.mixed_dataset import AutoPairEvalDataset
+from src.data.utils.dataset_utils import load_hf_dataset, sample_dataset
 
 # TASK_INST_TGT = "Represent the following text:\n"
 
@@ -31,7 +31,9 @@ class SSV2EvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         self.dataset_config['image_resolution'] = dataset_config.image_resolution
 
     def _load_hf_dataset(self):
-        return load_hf_dataset(EVAL_DATASET_HF_PATH[self.dataset_name]), None
+        dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[self.dataset_name])
+        
+        return sample_dataset(dataset, **self.dataset_config), None
 
     def _process_one_sample(self, data_idx, batch_dict, **kwargs):
         image_resolution = kwargs["image_resolution"]

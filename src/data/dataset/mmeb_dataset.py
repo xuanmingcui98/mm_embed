@@ -64,10 +64,6 @@ DATASET_PARSER_NAME = "mmeb"
 class MMEBDatasetProcessor(BaseDatasetProcessor):
     def __init__(self, *args, **dataset_config):
         
-        super().__init__(DATASET_PARSER_NAME, *args, **dataset_config,
-                         query_key_text="qry",
-                         query_key_mm="qry_image_path",
-                         cand_key_text="pos_text",
-                         cand_key_mm="pos_image_path")
+        super().__init__(DATASET_PARSER_NAME, *args, **dataset_config)
 
         self.dataset_name = self.dataset_config.get("dataset_name")

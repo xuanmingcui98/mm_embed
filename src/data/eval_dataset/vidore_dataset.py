@@ -59,9 +59,9 @@ class VidoreEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def _load_hf_dataset(self):
         hf_dataset_name = EVAL_DATASET_HF_PATH[self.dataset_config['dataset_name']][0]
         hf_dataset_split = EVAL_DATASET_HF_PATH[self.dataset_config['dataset_name']][2]
-        lang = EVAL_DATASET_HF_PATH[self.dataset_config['dataset_name']][1]
         # BEIR format
         dataset = load_hf_dataset((hf_dataset_name, "queries", hf_dataset_split))
+        lang = EVAL_DATASET_HF_PATH[self.dataset_config['dataset_name']][1]
         if lang is not None:
             dataset = dataset.filter(lambda example: example["language"] == lang)
         qrels = load_hf_dataset((hf_dataset_name, "qrels", hf_dataset_split))
@@ -79,7 +79,7 @@ class VidoreEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         self.dataset_config['image_resolution'] = self.data_args.image_resolution
         self.dataset_config['qrels_mapping'] = qrels_mapping
 
-        corpus = corpus.map(lambda x: corpus_prepare(x, **self.dataset_config), batched=True,
+        corpus = corpus.map(lambda x: self.corpus_prepare(x, **self.dataset_config), batched=True,
                             batch_size=2048, #num_proc=8,
                             drop_last_batch=False, load_from_cache_file=False)
         corpus = corpus.select_columns(['cand_text', 'cand_image', 'dataset_infos'])
@@ -104,11 +104,18 @@ class VidoreEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         cand_text, cand_image = [], []
         cand_names, label_names, rel_scores = [], [], []
 
+        query_description = self.query_descriptions[query_id] if self.query_descriptions else None
+        target_description = []
+
         for corpus_id, rel_score in qrels_mapping[query_id].items():
             image_path = f"{image_root}/{corpus_id}.png"
             if not os.path.exists(image_path):
                 raise FileNotFoundError(f"Image path {image_path} not found.")
             cand_text.append(process_input_text(TASK_INST_TGT, model_backbone, add_image_token=True))
+            if self.target_descriptions:
+                target_description.append(self.target_descriptions[corpus_id])
+            else:
+                target_description.append(None)
             cand_image.append(
                 ImageVideoInstance(
                     bytes=[None],
@@ -132,27 +139,40 @@ class VidoreEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "cand_text": cand_text,      # list[str]
             "cand_image": cand_image,    # list[dict]
             "dataset_infos": dataset_info,
+            "query_description": query_description,  # str or None
+            "target_description": target_description,  # list[str] or None
         }
 
-def corpus_prepare(batch_dict, *args, **kwargs):
-    image_resolution, model_backbone = kwargs['image_resolution'], kwargs['model_backbone']
-    image_root = kwargs['image_root']
+    def corpus_prepare(self, batch_dict, *args, **kwargs):
+        image_resolution, model_backbone = kwargs['image_resolution'], kwargs['model_backbone']
+        image_root = kwargs['image_root']
 
-    cand_texts, cand_images, dataset_infos = [], [], []
-    for corpus_id, image in zip(batch_dict['corpus-id'], batch_dict['image']):
-        image_path = f'{image_root}/{corpus_id}.png'
-        if not os.path.exists(image_path):
-            os.makedirs(image_root, exist_ok=True)
-            image.save(image_path)
-        cand_texts.append([process_input_text(TASK_INST_TGT, model_backbone, add_image_token=True)])
-        cand_images.append([ImageVideoInstance(
-            bytes=[None],
-            paths=[image_path],
-            resolutions=[RESOLUTION_MAPPING.get(image_resolution, None)],
-        ).to_dict()])
-        dataset_infos.append({
-            "cand_names": [corpus_id],
-        })
+        cand_texts, cand_images, dataset_infos = [], [], []
+        for corpus_id, image in zip(batch_dict['corpus-id'], batch_dict['image']):
+            image_path = f'{image_root}/{corpus_id}.png'
+            if not os.path.exists(image_path):
+                os.makedirs(image_root, exist_ok=True)
+                image.save(image_path)
 
-    return {"cand_text": cand_texts, "cand_image": cand_images,
-            "dataset_infos": dataset_infos}
+            if self.apply_chat_template:
+                target_description = self.target_descriptions[corpus_id] if self.target_descriptions else None
+                cand_texts.append(self.format_text_for_chat_template(
+                    False, 
+                    text=self.instruction['target'],
+                    image_path=image_path,
+                    add_generation_prompt=self.model_args.do_sft_target,
+                    description=target_description
+                    ))
+            else:
+                cand_texts.append([process_input_text(TASK_INST_TGT, model_backbone, add_image_token=True)])
+            cand_images.append([ImageVideoInstance(
+                bytes=[None],
+                paths=[image_path],
+                resolutions=[RESOLUTION_MAPPING.get(image_resolution, None)],
+            ).to_dict()])
+            dataset_infos.append({
+                "cand_names": [corpus_id],
+            })
+
+        return {"cand_text": cand_texts, "cand_image": cand_images,
+                "dataset_infos": dataset_infos}

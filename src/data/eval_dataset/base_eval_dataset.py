@@ -166,25 +166,6 @@ class BaseEvalDatasetProcessor:
 
         self.target_cache = {}
 
-    # def _add_signature_columns_map_func(self, batch_dict):
-        
-    #     raise NotImplementedError(
-    #         f"{self.__class__.__name__} does not implement `_add_signature_columns_map_func` method. "
-    #         "Please implement it in the subclass."
-    #     )
-
-    # def add_signature_columns(self):
-
-    #     self.dataset = self.dataset.map(
-    #         self._add_signature_columns_map_func,
-    #         batched=True,
-    #         batch_size=2048,
-    #         num_proc=4,
-    #         drop_last_batch=False,
-    #         load_from_cache_file=False
-    #     )
-
-
     def _load_hf_dataset(self):
         raise NotImplementedError(
             f"{self.__class__.__name__} does not implement `_load_hf_dataset` method. "
@@ -258,26 +239,24 @@ class BaseEvalDatasetProcessor:
         cand_dataset = Dataset.from_list(cand_rows)
         return cand_dataset
 
-    def format_text_for_chat_template(self, is_query, text=None, image_path=None, video_path=None, add_generation_prompt=False, key=None):
+    def format_text_for_chat_template(self, is_query, text=None, image_path=None, video_path=None, description=None, add_generation_prompt=False):
 
         if is_query:
             extract_fn = extract_query
-            desc = self.query_descriptions
             instruction = self.instruction['query'] if self.instruction is not None else None
         else:
             extract_fn = extract_target
-            desc = self.target_descriptions
             instruction = self.instruction['target'] if self.instruction is not None else None
 
         text = extract_fn(text, self.dataset_name)
-        if instruction is not None:
+        if instruction is not None and self.dataset_config['dataset_name'] != "MomentSeeker": # hacky here. momentseeker has mixed inputs
             text = instruction.format(text=text)
 
         # make sure no extra visual tokens are left in the text
         text = text.replace(VLM_IMAGE_TOKENS[self.model_backbone], "")
         text = text.replace(VLM_VIDEO_TOKENS[self.model_backbone], "").strip()
 
-        description = format_description(desc[key], self.data_args.use_cot) if (desc is not None and key is not None) else ""
+        description = format_description(description, self.data_args.prompt_format)
 
         formatted_sample = [
             {"role": "system",
@@ -325,18 +304,6 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
         self.subset_name = self.dataset_config.get("dataset_name")
         self.dataset_split = self.dataset_config.get("dataset_split", "test")
 
-        # # for MMEB v2, the query text doesn't include instructions, so we need to take the instruction part out from the description
-        # if self.query_descriptions is not None:
-        #     self.query_descriptions = {
-        #         (extract_query(qry_text, self.subset_name), qry_image_path): desc \
-        #         for (qry_text, qry_image_path), desc in self.query_descriptions.items()
-        #     }
-        # if self.target_descriptions is not None:
-        #     self.target_descriptions = {
-        #         (extract_target(tgt_text, self.subset_name), tgt_image_path): desc \
-        #         for (tgt_text, tgt_image_path), desc in self.target_descriptions.items()
-        #     }
-
         """
             Precompute targets to avoid repetitive processing 1000x for each sample.
         """
@@ -382,29 +349,26 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
                         tgts.append(self.target_cache[(tgt_text, tgt_image_path)])
                     cand_texts.append(tgts)
             else:
-                if self.instruction is not None:
-                    qry_text = self.instruction['query'].format(text=extract_query(qry_text, self.subset_name))
-                else:
-                    qry_text = get_query(self.subset_name, qry_text, self.data_args.use_cot)
-                
+
+                query_description = self.query_descriptions[(qry_text, qry_image_path)] if self.query_descriptions is not None else None
+
+                qry_text = self.instruction['query'].format(text=extract_query(qry_text, self.subset_name))
                 qry_text = self.format_text_for_chat_template(True, 
                                                               text=qry_text, 
                                                               image_path=qry_image_path, 
                                                               add_generation_prompt=self.model_args.do_sft_query,
-                                                              key=(qry_text, qry_image_path))
+                                                              description=query_description)
                 cand_text = []
                 for tgt_cap, tgt_img_path in zip(tgt_texts, tgt_image_paths):
                     if (tgt_cap, tgt_img_path) not in self.target_cache:
-                        if self.instruction is not None:
-                            tgt_text = self.instruction['target'].format(text=extract_target(tgt_cap, self.subset_name))
-                        else:
-                            tgt_text = get_target(self.subset_name, tgt_cap, self.data_args.use_cot)
+                        target_description = self.target_descriptions[(tgt_cap, tgt_img_path)] if self.target_descriptions is not None else None
+                        tgt_text = self.instruction['target'].format(text=extract_target(tgt_cap, self.subset_name))
                         self.target_cache[(tgt_cap, tgt_img_path)] = self.format_text_for_chat_template(
                                                                         False, 
                                                                         text=tgt_text, 
                                                                         image_path=tgt_img_path, 
                                                                         add_generation_prompt=self.model_args.do_sft_target,
-                                                                        key=(tgt_cap, tgt_img_path))
+                                                                        description=target_description)
                         
                     cand_text.append(self.target_cache[(tgt_cap, tgt_img_path)])
                 cand_texts.append(cand_text)
@@ -425,12 +389,9 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
                 "label_name": cand_names[0],
             })
 
-        processed_batch = {"query_text": query_texts, "query_image": query_images,
+        return {"query_text": query_texts, "query_image": query_images,
                 "cand_text": cand_texts, "cand_image": cand_images,
                 "dataset_infos": dataset_infos}
-        return batch_dict | processed_batch
-
-
 
 class MMEBV2EvalDatasetProcessor(BaseEvalDatasetProcessor):
 
@@ -446,11 +407,12 @@ class MMEBV2EvalDatasetProcessor(BaseEvalDatasetProcessor):
 
         for data_idx in range(batch_size):
             one_sample = self._process_one_sample(data_idx, batch_dict, *args, **kwargs)
-            query_text, query_image, cand_text, cand_image, dataset_info = \
+            query_text, query_image, cand_text, cand_image, dataset_info, query_description, target_description = \
                 one_sample['query_text'], one_sample['query_image'], \
                 one_sample['cand_text'], one_sample['cand_image'], \
-                one_sample['dataset_infos']
-
+                one_sample['dataset_infos'], \
+                one_sample['query_description'], one_sample['target_description']
+            
             if self.data_args.apply_chat_template:
 
                 query_image_input = query_video_input = None
@@ -461,18 +423,16 @@ class MMEBV2EvalDatasetProcessor(BaseEvalDatasetProcessor):
                     else:
                         query_image_input = query_image['paths'][0] or query_image['bytes'][0]
                 
-                query_key_text = batch_dict[self.query_key_text][data_idx] if self.query_key_text else ""
-                query_key_mm = batch_dict[self.query_key_mm][data_idx] if self.query_key_mm else ""
 
                 query_text = self.format_text_for_chat_template(
                                     is_query=True, 
                                     text=query_text, 
                                     image_path=query_image_input, 
                                     video_path=query_video_input, 
-                                    key=(query_key_text, query_key_mm))
+                                    description=query_description)
                 
                 cands = []
-                for single_cand_text, single_cand_image in zip(cand_text, cand_image):
+                for single_cand_text, single_cand_image, single_tasrget_description in zip(cand_text, cand_image, target_description):
                     cand_image_input = cand_video_input = None
                     if single_cand_image:
                         if len(single_cand_image['paths']) > 1:
@@ -480,21 +440,30 @@ class MMEBV2EvalDatasetProcessor(BaseEvalDatasetProcessor):
                         else:
                             cand_image_input = single_cand_image['paths'][0] or single_cand_image['bytes'][0]
                     
-                    single_cand_key_mm = cand_image_input or cand_video_input
-                    if (single_cand_text, single_cand_key_mm) not in self.target_cache:
-                        self.target_cache[(single_cand_text, single_cand_key_mm)] = self.format_text_for_chat_template(
-                                                                                        False, 
-                                                                                        text=single_cand_text,
-                                                                                        image_path=cand_image_input,
-                                                                                        video_path=cand_video_input, 
-                                                                                        add_generation_prompt=self.model_args.do_sft_target,
-                                                                                        key=(single_cand_text, single_cand_key_mm))
-                    cands.append(self.target_cache[(single_cand_text, single_cand_key_mm)])
-                cand_text = cands
+                    # single_cand_key_mm = cand_image_input or cand_video_input
+                    # if (single_cand_text, single_cand_key_mm) not in self.target_cache:
+                    #     self.target_cache[(single_cand_text, single_cand_key_mm)] = self.format_text_for_chat_template(
+                    #                                                                     False, 
+                    #                                                                     text=single_cand_text,
+                    #                                                                     image_path=cand_image_input,
+                    #                                                                     video_path=cand_video_input, 
+                    #                                                                     add_generation_prompt=self.model_args.do_sft_target,
+                    #                                                                     description=target_description
+                    #                                                                     )
+                    # cands.append(self.target_cache[(single_cand_text, single_cand_key_mm)])
+
+                    cands.append(self.format_text_for_chat_template(
+                        False, 
+                        text=single_cand_text,
+                        image_path=cand_image_input,
+                        video_path=cand_video_input, 
+                        add_generation_prompt=self.model_args.do_sft_target,
+                        description=single_tasrget_description
+                        ))
 
             query_texts.append([query_text])
             query_images.append([query_image])
-            cand_texts.append(cand_text)
+            cand_texts.append(cands)
             cand_images.append(cand_image)
             dataset_infos.append(dataset_info)
 

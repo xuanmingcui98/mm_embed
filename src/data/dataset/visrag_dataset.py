@@ -47,11 +47,7 @@ DATASET_PARSER_NAME = "visrag"
      'target': VISDOC_EMBED_INSTRUCTION})
 class VisragDatasetProcessor(VideoDatasetProcessor):
     def __init__(self, *args, **dataset_config):
-        super().__init__(DATASET_PARSER_NAME, *args, **dataset_config,
-                         query_key_text="query",
-                         query_key_mm=None,
-                         cand_key_text="source",
-                         cand_key_mm="image")
+        super().__init__(DATASET_PARSER_NAME, *args, **dataset_config)
 
     def _load_hf_dataset(self):
         dataset_name = self.dataset_config.get("dataset_name", DATASET_PARSER_NAME)

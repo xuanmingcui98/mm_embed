@@ -12,6 +12,8 @@ import random
 import cv2
 from ..prompts import VIDEO_QA_INSTRUCTION, TEXT_EMBED_INSTRUCTION
 from ..loader.mixed_dataset import AutoPairEvalDataset
+from ..dataset_hf_path import EVAL_DATASET_HF_PATH
+from src.data.utils.dataset_utils import load_hf_dataset, sample_dataset
                        
 
 def process_query(query, prompt, video_token=''):
@@ -41,7 +43,8 @@ class ActivityNetQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                         cand_key_text=None, cand_key_mm=None, **dataset_config)
 
     def _load_hf_dataset(self):
-        return load_dataset('json', data_files=self.dataset_config["data_path"])['train'], None
+        # return load_dataset('json', data_files=self.dataset_config["data_path"])['train'], None
+        return load_hf_dataset(EVAL_DATASET_HF_PATH[self.dataset_config['dataset_name']]), None
 
     def _process_one_sample(self, idx, batch_dict, *args, **kwargs):
 
@@ -82,6 +85,10 @@ class ActivityNetQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             cap.release()
             # print(f'[{DATASET_PARSER_NAME}] Extracted #frames: {saved_frames}, dumped to {frame_dir}')
 
+        query_description = target_description = None
+        if self.query_descriptions:
+            query_description = self.query_descriptions[(query, video_name)]
+        
         qry_frame_paths = process_video_frames(frame_dir, num_frames=num_frames)
         query_images = {"bytes": [None] * len(qry_frame_paths), "paths": qry_frame_paths, "resolutions": [None] * len(qry_frame_paths)}
         cand_images = [None] * len(OPTIONS)
@@ -102,4 +109,6 @@ class ActivityNetQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "cand_text": OPTIONS,
             "cand_image": cand_images,
             "dataset_infos": dataset_info,
+            "query_description": query_description,
+            "target_description": target_description
             }

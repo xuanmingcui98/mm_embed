@@ -7,8 +7,7 @@ import pickle, os
 from datasets import load_dataset, concatenate_datasets
 from ...model.processor import PHI3V, VLM_IMAGE_TOKENS, VLM_VIDEO_TOKENS
 from ...utils import print_master, print_rank
-from ..prompts import (get_query, get_target, 
-                       format_description, format_text_for_chat_template, 
+from ..prompts import (format_description,
                        extract_query, extract_target,
                        IMAGE_TASKS,
                        TASK2ID)
@@ -76,10 +75,6 @@ class BaseDatasetProcessor:
                  data_args, 
                  training_args, 
                  processor, 
-                 query_key_text=None,
-                 query_key_mm=None,
-                 cand_key_text=None,
-                 cand_key_mm=None,
                  instruction=None,
                  **dataset_config):
         self.model_args = model_args
@@ -207,15 +202,13 @@ class BaseDatasetProcessor:
         """
         raise NotImplementedError("This method should be implemented by subclasses.")
     
-    def format_text_for_chat_template(self, is_query, text, image_path=None, video_path=None, key=None, add_generation_prompt=False):
+    def format_text_for_chat_template(self, is_query, text, image_path=None, video_path=None, description=None, add_generation_prompt=False):
 
         if is_query:
             extract_fn = extract_query
-            desc = self.query_descriptions
             instruction = self.instruction['query'] if self.instruction is not None else None
         else:
             extract_fn = extract_target
-            desc = self.target_descriptions
             instruction = self.instruction['target'] if self.instruction is not None else None
 
         text = extract_fn(text, self.subset_name)
@@ -226,8 +219,7 @@ class BaseDatasetProcessor:
         if instruction is not None:
             text = instruction.format(text=text)
 
-
-        description = format_description(desc[key], self.data_args.use_cot) if (desc is not None and key is not None) else ""
+        description = format_description(description, self.data_args.prompt_format)
 
         formatted_sample = []
         user_content = [] 
@@ -267,8 +259,13 @@ class BaseDatasetProcessor:
                 continue
 
             if data_args.apply_chat_template:
-                qry_text = self.format_text_for_chat_template(is_query=True, text=qry_text, image_path=qry_image_path, add_generation_prompt=False, key=(qry_text, qry_image_path))
-                pos_text = self.format_text_for_chat_template(is_query=False, text=pos_text, image_path=pos_image_path, add_generation_prompt=False, key=(pos_text, pos_image_path))
+                query_description = pos_description = None
+                if self.query_descriptions:
+                    query_description = self.query_descriptions[(qry_text, qry_image_path)]
+                if self.target_descriptions:
+                    pos_description = self.target_descriptions[(pos_text, pos_image_path)]
+                qry_text = self.format_text_for_chat_template(is_query=True, text=qry_text, image_path=qry_image_path, add_generation_prompt=False, description=query_description)
+                pos_text = self.format_text_for_chat_template(is_query=False, text=pos_text, image_path=pos_image_path, add_generation_prompt=False, description=pos_description)
             else:
                 if self.model_backbone != PHI3V:
                     qry_text = qry_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[self.model_backbone])
@@ -292,44 +289,6 @@ class BaseDatasetProcessor:
                 "pos_text": pos_texts, "pos_image": pos_images,
                 "neg_text": neg_texts, "neg_image": neg_images}
 
-    @add_metainfo_hook
-    def single_preprocess(self, batch_dict, *args, **kwargs):
-        """
-            Preprocess a single sample.
-            May be implemented by subclasses.
-        """
-        qry_text, qry_image_path, pos_text, pos_image_path, neg_text, neg_image_path = \
-            batch_dict['qry'], batch_dict['qry_image_path'], \
-            batch_dict['pos_text'], batch_dict['pos_image_path'], \
-            batch_dict.get('neg_text', ''), batch_dict.get('neg_image_path', None)
-        if (not qry_text and not qry_image_path) or (not pos_text and not pos_image_path):
-            print("empty inputs")
-            return None
-        
-        if self.data_args.apply_chat_template:
-            qry_text = self.format_text_for_chat_template(is_query=True, text=qry_text, image_path=qry_image_path, add_generation_prompt=False, key=(qry_text, qry_image_path))
-            pos_text = self.format_text_for_chat_template(is_query=False, text=pos_text, image_path=pos_image_path, add_generation_prompt=False, key=(pos_text, pos_image_path))
-        else:
-            if self.model_backbone != PHI3V:
-                qry_text = qry_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[self.model_backbone])
-                pos_text = pos_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[self.model_backbone])
-                neg_text = neg_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[self.model_backbone]) if neg_text else ''
-        
-        qry_image = {"bytes": [None], "paths": [os.path.join(self.image_dir, qry_image_path) if qry_image_path else None], "resolutions": [RESOLUTION_MAPPING.get(self.image_resolution, None)]}
-        pos_image = {"bytes": [None], "paths": [os.path.join(self.image_dir, pos_image_path) if pos_image_path else None], "resolutions": [RESOLUTION_MAPPING.get(self.image_resolution, None)]}
-        neg_image = {"bytes": [None], "paths": [os.path.join(self.image_dir, neg_image_path) if neg_image_path else None], "resolutions": [RESOLUTION_MAPPING.get(self.image_resolution, None)]}
-            
-        return {
-            "query_text": qry_text,
-            "query_image": qry_image,
-            "pos_text": pos_text,
-            "pos_image": pos_image,
-            "neg_text": neg_text,
-            "neg_image": neg_image,
-        }
-
-
-
 class VideoDatasetProcessor(BaseDatasetProcessor):
     def __init__(self, dataset_parser_name, model_args, data_args, training_args, **kwargs):
         super().__init__(dataset_parser_name, model_args, data_args, training_args, **kwargs)
@@ -351,7 +310,7 @@ class VideoDatasetProcessor(BaseDatasetProcessor):
 
         for data_idx in range(batch_size):
             one_sample = self._process_one_sample(data_idx, batch_dict, *args, **kwargs)
-            query_text, query_image, pos_text, pos_image, neg_text, neg_image  = \
+            query_text, query_image, pos_text, pos_image, neg_text, neg_image, query_description, target_description  = \
                 one_sample['query_text'], one_sample['query_image'], \
                 one_sample['pos_text'], one_sample['pos_image'], \
                 one_sample['neg_text'], one_sample['neg_image']
@@ -372,16 +331,12 @@ class VideoDatasetProcessor(BaseDatasetProcessor):
                     else:
                         pos_image_input = pos_image['paths'][0] or pos_image['bytes'][0]
                 
-                query_key_text = batch_dict[self.query_key_text][data_idx] if self.query_key_text else ""
-                query_key_mm = batch_dict[self.query_key_mm][data_idx] if self.query_key_mm else ""
-                cand_key_text = batch_dict[self.cand_key_text][data_idx] if self.cand_key_text else ""
-                cand_key_mm = batch_dict[self.cand_key_mm][data_idx] if self.cand_key_mm else ""
                 query_text = self.format_text_for_chat_template(
                     is_query=True, text=query_text, image_path=query_image_input, video_path=query_video_input, 
-                    key=(query_key_text, query_key_mm))
+                    description=query_description)
                 pos_text = self.format_text_for_chat_template(
                     is_query=False, text=pos_text, image_path=pos_image_input, video_path=pos_video_input, 
-                    key=(cand_key_text, cand_key_mm))
+                    description=target_description)
 
             query_texts.append(query_text)
             query_images.append(query_image)
@@ -393,50 +348,3 @@ class VideoDatasetProcessor(BaseDatasetProcessor):
         return {"query_text": query_texts, "query_image": query_images,
                 "pos_text": pos_texts, "pos_image": pos_images,
                 "neg_text": neg_texts, "neg_image": neg_images,}
-
-    @add_metainfo_hook
-    def single_preprocess(self, batch_dict, *args, **kwargs):
-
-        batch_dict_to_list = {k: [v] for k, v in batch_dict.items()}
-        one_sample = self._process_one_sample(0, batch_dict_to_list, *args, **kwargs)
-
-        query_text, query_image, pos_text, pos_image, neg_text, neg_image  = \
-            one_sample['query_text'], one_sample['query_image'], \
-            one_sample['pos_text'], one_sample['pos_image'], \
-            one_sample['neg_text'], one_sample['neg_image']
-        
-        if self.data_args.apply_chat_template:
-
-            query_image_input = query_video_input = None
-            if query_image:
-                if len(query_image['paths']) > 1:
-                    query_video_input = query_image['paths'][0] or query_image['bytes'][0]
-                else:
-                    query_image_input = query_image['paths'][0] or query_image['bytes'][0]
-            
-            pos_image_input = pos_video_input = None
-            if pos_image:
-                if len(pos_image['paths']) > 1:
-                    pos_video_input = pos_image['paths'][0] or pos_image['bytes'][0]
-                else:
-                    pos_image_input = pos_image['paths'][0] or pos_image['bytes'][0]
-            
-            query_key_text = batch_dict[self.query_key_text] if self.query_key_text else ""
-            query_key_mm = batch_dict[self.query_key_mm] if self.query_key_mm else ""
-            cand_key_text = batch_dict[self.cand_key_text] if self.cand_key_text else ""
-            cand_key_mm = batch_dict[self.cand_key_mm] if self.cand_key_mm else ""
-            query_text = self.format_text_for_chat_template(
-                is_query=True, text=query_text, image_path=query_image_input, video_path=query_video_input, 
-                key=(query_key_text, query_key_mm))
-            pos_text = self.format_text_for_chat_template(
-                is_query=False, text=pos_text, image_path=pos_image_input, video_path=pos_video_input, 
-                key=(cand_key_text, cand_key_mm))
-            
-        return {
-            "query_text": query_text,
-            "query_image": query_image,
-            "pos_text": pos_text,
-            "pos_image": pos_image,
-            "neg_text": neg_text,
-            "neg_image": neg_image,
-        }

@@ -51,6 +51,10 @@ class DiDemoEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         cand_text, cand_image = [], []
         dataset_infos = {"cand_names": [video_name], "label_name": video_name}
 
+        query_description = target_description = None
+        if self.query_descriptions:
+            query_description = self.query_descriptions[(video_name,)]
+
         try:
             # Extract & process frames
             save_frames(video_path=video_path, frame_dir=frame_dir, max_frames_saved=max_frames_saved)
@@ -77,4 +81,6 @@ class DiDemoEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "cand_text": cand_text,         # list[str]
             "cand_image": cand_image,       # list[dict], zipped with cand_text
             "dataset_infos": dataset_infos, # per-sample info
+            "query_description": query_description,
+            "target_description": target_description,
         }

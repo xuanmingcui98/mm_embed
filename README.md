@@ -19,11 +19,11 @@ First set up default config from original VLM2Vec:
 
 ```
 # at root level
-mkdir configs; cd configs; mkdir train; cd train; wget https://github.com/TIGER-AI-Lab/VLM2Vec/blob/main/experiments/public/train/train_alltasks.yaml; cd ..
+mkdir configs; cd configs; mkdir train; cd train; wget https://raw.githubusercontent.com/TIGER-AI-Lab/VLM2Vec/main/experiments/public/train/train_alltasks.yaml; cd ..
 mkdir eval; cd eval
-wget https://github.com/TIGER-AI-Lab/VLM2Vec/blob/main/experiments/public/eval/image.yaml
-wget https://github.com/TIGER-AI-Lab/VLM2Vec/blob/main/experiments/public/eval/video.yaml
-wget https://github.com/TIGER-AI-Lab/VLM2Vec/blob/main/experiments/public/eval/visdoc.yaml
+wget https://raw.githubusercontent.com/TIGER-AI-Lab/VLM2Vec/main/experiments/public/eval/image.yaml
+wget https://raw.githubusercontent.com/TIGER-AI-Lab/VLM2Vec/main/experiments/public/eval/video.yaml
+wget https://raw.githubusercontent.com/TIGER-AI-Lab/VLM2Vec/main/experiments/public/eval/visdoc.yaml
 cd ../..
 ```
 

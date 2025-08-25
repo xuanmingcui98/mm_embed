@@ -66,7 +66,7 @@ class DataArguments:
 
     # added
 
-    use_cot: bool = field(default=True, metadata={"help": "use chain-of-thought reasoning"})
+    prompt_format: str = field(default="cot_gt", metadata={"help": "cot_answer, cot_only, and answer_only"})
     max_desc_len: int = field(default=1024, metadata={"help": "maximum description length"})
     query_description_dir: str = field(default=None, metadata={"help": "directory for saving descriptions"})
     apply_chat_template: bool = field(default=True, metadata={"help": "apply chat template to the dataset"})

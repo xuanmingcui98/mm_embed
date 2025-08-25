@@ -7,7 +7,10 @@ from src.data.utils.dataset_utils import load_hf_dataset
 from src.data.eval_dataset.base_eval_dataset import RESOLUTION_MAPPING, MMEBV2EvalDatasetProcessor
 from src.data.utils.vision_utils import load_frames, save_frames
 from src.model.processor import process_input_text
-from ..prompts import VIDEO_EMBED_INSTRUCTION
+from ..prompts import (VIDEO_EMBED_INSTRUCTION, 
+                       IMAGE_TEXT_EMBED_INSTRUCTION, 
+                       VIDEO_TEXT_EMBED_INSTRUCTION, 
+                       TEXT_EMBED_INSTRUCTION)
 from ..loader.mixed_dataset import AutoPairEvalDataset
 
 TASK_INST_QRY_TEXT = "" # "Find the clip that corresponds to the given text:"
@@ -18,7 +21,7 @@ TASK_INST_TGT = "" # "Understand the content of the provided video clip."
 DATASET_PARSER_NAME = "momentseeker"
 @AutoPairEvalDataset.register(DATASET_PARSER_NAME)
 @AutoPairEvalDataset.register_instruction("MomentSeeker",
-    {'query': """Given a video and a query, identify the clip in the video that best matches the query.\n\nQuery: {text}\n\nEmbed the clip with your answer.""",
+    {'query': {"video": VIDEO_TEXT_EMBED_INSTRUCTION, "image": IMAGE_TEXT_EMBED_INSTRUCTION, "text": TEXT_EMBED_INSTRUCTION},
      'target': VIDEO_EMBED_INSTRUCTION})
 class MomentSeekerEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self, *args,**dataset_config):
@@ -61,12 +64,18 @@ class MomentSeekerEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
 
         # --- Build query text/image depending on input modality ---
         if isinstance(input_frames, str) and input_frames.endswith(".mp4"):
-            # Text: video query (no tokens; parent chat-template will handle tokens if enabled)
-            query_text = process_input_text(TASK_INST_QRY_VIDEO, model_backbone, text=query, add_video_token=True)
+            # Text: video query (no tokens; parent chat-template will handle tokens if enabled) 
+
+            if self.data_args.apply_chat_template:
+                query_text = self.instruction['query']['video'].format(text=query)
+            else:
+                query_text = process_input_text(TASK_INST_QRY_VIDEO, model_backbone, text=query, add_video_token=True)
 
             # Frames dir for this query video
             query_video_name = input_frames.split(".mp4")[0].replace("/", "_")
             query_frame_dir  = os.path.join(frame_root, "video_frames", query_video_name)
+
+            query_description = self.query_descriptions[(query, os.path.join("video_frames", query_video_name))] if self.query_descriptions else None
 
             # Extract frames if needed, then load
             if not os.path.exists(query_frame_dir):
@@ -84,7 +93,11 @@ class MomentSeekerEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
 
         elif isinstance(input_frames, str) and input_frames.endswith(".jpg"):
             # Text: image query
-            query_text = process_input_text(TASK_INST_QRY_IMG, model_backbone, text=query, add_image_token=True)
+
+            if self.data_args.apply_chat_template:
+                query_text = self.instruction['query']['image'].format(text=query)
+            else:
+                query_text = process_input_text(TASK_INST_QRY_IMG, model_backbone, text=query, add_image_token=True)
 
             # Use the provided single image (stored under frame_root as "query_<fname>")
             input_image_path = os.path.join(frame_root, f"query_{input_frames}")
@@ -96,12 +109,18 @@ class MomentSeekerEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
 
         else:
             # Pure text query
-            query_text = process_input_text(TASK_INST_QRY_TEXT, model_backbone, text=query, add_video_token=True)
+
+            if self.data_args.apply_chat_template:
+                query_text = self.instruction['query']['text'].format(text=query)
+            else:
+                query_text = process_input_text(TASK_INST_QRY_TEXT, model_backbone, text=query, add_video_token=True)
             query_image = None
 
         # --- Build candidate clips (positives + negatives) ---
         pos_clip_paths = [entry["output_path"] for entry in positive_frames]
         neg_clip_paths = [entry["output_path"] for entry in negative_frames]
+
+        target_description = []
 
         # Helper to add one clip candidate
         def _add_clip_candidate(path: str, is_positive: bool):
@@ -118,6 +137,9 @@ class MomentSeekerEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                 "paths": frame_paths,
                 "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)] * len(frame_paths),
             })
+
+            if self.target_descriptions:
+                target_description.append(self.target_descriptions[(os.path.join("video_frames", clip_name),)])
             cand_clip_names.append(clip_frame_dir)
             if is_positive:
                 pos_clip_name.append(clip_frame_dir)
@@ -143,4 +165,6 @@ class MomentSeekerEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "cand_text": cand_text,
             "cand_image": cand_image,
             "dataset_infos": dataset_infos,
+            "query_description": query_description,
+            "target_description": target_description,
         }
