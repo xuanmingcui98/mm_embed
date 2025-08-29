@@ -89,9 +89,9 @@ def main():
         dataset_name = dataset_name.strip()
 
         folder = os.path.join("descriptions", dataset_name, "cot")
-        if os.path.exists(folder):
-            print(f"Folder {folder} already exists, skipping...")
-            continue
+        # if os.path.exists(folder):
+        #     print(f"Folder {folder} already exists, skipping...")
+        #     continue
 
         os.makedirs(folder, exist_ok=True)
 
@@ -141,7 +141,7 @@ def main():
             mm_field = 'image'
             args.encode_target = "query"
         elif dataset_name == "ActivityNetQA":
-            dataset = load_dataset('json', data_files=config["data_path"])['train']
+            dataset = load_dataset('json', data_files=config[dataset_name]["data_path"])['train']
             key_fields = ['question', 'video_name']
             query_text_field = "question"
             mm_field = 'video_name'
@@ -152,7 +152,8 @@ def main():
             dataset = dataset.map(func)
         elif dataset_name == "DiDeMo":
             dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[dataset_name])
-            key_fields = ['video_rel']
+            key_fields = ['video']
+            mm_field = "video"
             def func(row):
                 row['video_filename'] = os.path.splitext(os.path.basename(row['video']))[0]
                 return row
@@ -382,6 +383,7 @@ def main():
             dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[dataset_name])
             mm_field = 'id'
             key_fields = ['id']
+            args.encode_target = "target"
 
         else:
             raise ValueError(f"Dataset {dataset_name} not supported.")

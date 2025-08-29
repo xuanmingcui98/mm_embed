@@ -421,5 +421,6 @@ for dataset in ["MSVD", "MSR-VTT", "DiDeMo", "VATEX"]:
     prompts[dataset] = prompts["video_caption_300k"]
 
 prompts['UCF101'] = prompts['Kinetics-700']
+prompts['SmthSmthV2'] = prompts['HMDB51']
 
 moment_retrieval_query_prompts['Charades-STA'] = moment_retrieval_query_prompts['QVHighlight']

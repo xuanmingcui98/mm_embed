@@ -161,6 +161,9 @@ class BaseEvalDatasetProcessor:
                 with open(desc_path, "rb") as f:
                     self.target_descriptions = pickle.load(f)
 
+        if self.query_descriptions is None and self.target_descriptions is None and (data_args.target_description_dir or data_args.query_description_dir):
+            print_rank(f"Warning: No descriptions found for dataset {self.dataset_name} at {data_args.target_description_dir} or {data_args.query_description_dir}")
+
         self.target_cache = {}
 
     def _load_hf_dataset(self):
@@ -180,7 +183,7 @@ class BaseEvalDatasetProcessor:
         # if self.data_args.apply_chat_template:
         #     self.prepared_targets = self.prepare_targets()
         self.dataset = self.dataset.map(lambda x: self.batch_preprocess(x, **self.dataset_config), batched=True,
-                            batch_size=1024, num_proc=4,
+                            batch_size=1024, # num_proc=4,
                             drop_last_batch=False, load_from_cache_file=False)
         # else:
         #     self.dataset = self.dataset.map(lambda x: self.batch_preprocess_bm(x, **dataset_config), batched=True,

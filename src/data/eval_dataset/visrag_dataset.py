@@ -88,7 +88,7 @@ class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                 raise FileNotFoundError(f"Image path {image_path} not found.")
 
             if self.target_descriptions:
-                target_desc = self.target_descriptions.get(new_imagename)
+                target_desc = self.target_descriptions.get((new_imagename, ))
                 if target_desc is None:
                     print(f"No target description found for image {new_imagename} for corpus dataset for {self.dataset_config['dataset_name']}")
                 target_description.append(target_desc)
@@ -139,7 +139,7 @@ class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             if self.apply_chat_template:
                 target_description = None
                 if self.target_descriptions:
-                    target_description = self.target_descriptions.get(new_imagename)
+                    target_description = self.target_descriptions.get((new_imagename,))
                     if not target_description:
                         print(f"Warning: No target description found for image {new_imagename} for corpus dataset for {self.dataset_config['dataset_name']}")
                 cand_texts.append([self.format_text_for_chat_template(

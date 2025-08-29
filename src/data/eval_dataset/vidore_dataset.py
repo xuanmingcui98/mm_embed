@@ -138,7 +138,7 @@ class VidoreEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             if self.apply_chat_template:
                 target_description = None
                 if self.target_descriptions:
-                    target_description = self.target_descriptions.get(corpus_id)
+                    target_description = self.target_descriptions.get((corpus_id,))
                     if not target_description:
                         print(f"Warning: No target description found for corpus_id {corpus_id} for corpus dataset for {self.dataset_config['dataset_name']}")
                 cand_texts.append([self.format_text_for_chat_template(
