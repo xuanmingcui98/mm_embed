@@ -29,10 +29,10 @@ DATASET_PARSER_NAME = "video_classification"
     {'query': """Given the video, identify the activities or sports being performed by the person. Embed the video with your answer.""",
      'target': TEXT_EMBED_INSTRUCTION})
 @AutoPairEvalDataset.register_instruction("Kinetics-700",
-    {'query': """Given the video, recognize the category of the video content. Embed the video with your answer.""",
+    {'query': """Given the video, identify the category of the video content. Embed the video with your answer.""",
      'target': TEXT_EMBED_INSTRUCTION})
 @AutoPairEvalDataset.register_instruction("Breakfast",
-    {'query': """Given the video, recognize the breakfast type that the person is cooking in the video. Embed the video with your answer.""",
+    {'query': """Given the video, identify the breakfast type that the person is cooking in the video. Embed the video with your answer.""",
      'target': TEXT_EMBED_INSTRUCTION})
 class VideoClassificationEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self, *args,**dataset_config):
@@ -97,10 +97,18 @@ class VideoClassificationEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         except Exception as e:
             dataset_infos["error"] = str(e)
 
+        query_description = None
+        if self.query_descriptions:
+            query_description = self.query_descriptions.get((video_id,))
+            if query_description is None:
+                print(f"No query description for video {video_id} in {self.dataset_config['dataset_name']} dataset")
+
         return {
             "query_text": query_text,   # str
             "query_image": query_image, # dict or None
             "cand_text": cand_text,     # [label]
             "cand_image": cand_image,   # [None]
             "dataset_infos": dataset_infos,
+            "query_description": query_description,
+            "target_description": None,
         }

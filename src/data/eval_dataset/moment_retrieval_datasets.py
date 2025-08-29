@@ -21,10 +21,7 @@ DATASET_PARSER_NAME = "moment_retrieval"
 class MomentRetrievalEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self, *args, **dataset_config):
 
-        super().__init__(DATASET_PARSER_NAME, *args,
-                         query_key_text='query', query_key_mm='video_path',
-                         cand_key_text=None, cand_key_mm='video_path',
-                         **dataset_config)
+        super().__init__(DATASET_PARSER_NAME, *args, **dataset_config)
 
     def _load_hf_dataset(self):
         if self.dataset_config.get("data_path", None) != None:
@@ -118,7 +115,12 @@ class MomentRetrievalEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                     })
                     cand_clip_names.append(clip_dir_abs) 
                     if self.target_descriptions:
-                        target_description.append(self.target_descriptions[(os.path.join(video_name, entry),)])
+                        target_desc = self.target_descriptions.get((os.path.join(video_name, entry),))
+                        target_description.append(target_desc)
+                        if not target_desc:
+                            print(f'No target description found for ({os.path.join(video_name, entry)},) for dataset {DATASET_PARSER_NAME}')
+                    else:
+                        target_description.append(None)
 
                 # Text for each candidate (parent will handle chat-template if enabled)
                 if len(cand_clip_names) > 0:
@@ -138,7 +140,11 @@ class MomentRetrievalEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             }
 
         query_text = process_input_text(TASK_INST_QRY, model_backbone, text=query_text_raw, add_video_token=True)
-        query_description = self.query_descriptions[(query_text_raw, query_frame_dir)] if self.query_descriptions else None
+        query_description = None
+        if self.query_descriptions:
+            query_description = self.query_descriptions.get((query_text_raw, query_frame_dir))
+            if not query_description:
+                print(f'No query description found for ({query_text_raw}, {query_frame_dir}) for dataset {self.dataset_config["dataset_name"]}')
 
         return {
             "query_text": query_text,

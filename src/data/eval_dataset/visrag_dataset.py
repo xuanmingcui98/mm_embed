@@ -44,11 +44,15 @@ class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         qrels_mapping = load_qrels_mapping(qrels)
         dataset = sample_dataset(dataset, **self.dataset_config)
 
+        if self.data_args.debug_prompt:
+            dataset = dataset.select(range(1))
+            corpus = corpus.select(range(1))
+
         self.dataset_config['model_backbone'] = self.model_args.model_backbone
         self.dataset_config['image_resolution'] = self.data_args.image_resolution
         self.dataset_config['qrels_mapping'] = qrels_mapping
         corpus = corpus.map(lambda x: self.corpus_prepare(x, **self.dataset_config), batched=True,
-                            batch_size=1024, num_proc=4,
+                            batch_size=1024, #num_proc=4,
                             drop_last_batch = False, load_from_cache_file=False)
         corpus = corpus.select_columns(['cand_text', 'cand_image', 'dataset_infos'])
 
@@ -84,7 +88,10 @@ class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                 raise FileNotFoundError(f"Image path {image_path} not found.")
 
             if self.target_descriptions:
-                target_description.append(self.target_descriptions[new_imagename])
+                target_desc = self.target_descriptions.get(new_imagename)
+                if target_desc is None:
+                    print(f"No target description found for image {new_imagename} for corpus dataset for {self.dataset_config['dataset_name']}")
+                target_description.append(target_desc)
             else:
                 target_description.append(None)
 
@@ -130,13 +137,17 @@ class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                 image.save(image_path)
 
             if self.apply_chat_template:
-                target_description = self.target_descriptions[new_imagename] if self.target_descriptions else None
-                cand_texts.append(self.format_text_for_chat_template(
+                target_description = None
+                if self.target_descriptions:
+                    target_description = self.target_descriptions.get(new_imagename)
+                    if not target_description:
+                        print(f"Warning: No target description found for image {new_imagename} for corpus dataset for {self.dataset_config['dataset_name']}")
+                cand_texts.append([self.format_text_for_chat_template(
                     False, 
                     image_path=image_path,
                     add_generation_prompt=self.model_args.do_sft_target,
                     description=target_description
-                    ))
+                    )])
             else:
                 cand_texts.append([process_input_text(TASK_INST_TGT, model_backbone, add_image_token=True)])
 

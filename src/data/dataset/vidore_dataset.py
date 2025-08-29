@@ -20,7 +20,7 @@ TASK_INST_TGT = "" #"Represent the following text:\n"
 
 DATASET_PARSER_NAME = "vidore"
 @AutoPairDataset.register(DATASET_PARSER_NAME)
-@AutoPairDataset.register_instruction("vidore",
+@AutoPairDataset.register_instruction("colpali_train_set",
     {'query': IMAGE_QA_INSTRUCTION,
      'target': TEXT_EMBED_INSTRUCTION})
 class VidoReDatasetProcessor(VideoDatasetProcessor):
@@ -34,9 +34,11 @@ class VidoReDatasetProcessor(VideoDatasetProcessor):
         dataset_path = kwargs.get("dataset_path", None)
 
         if dataset_name:
-            dataset = load_dataset(dataset_name, split=dataset_split)
+            dataset = load_dataset("vidore/colpali_train_set", split=dataset_split)
         elif dataset_path:
             dataset = load_dataset("parquet", data_files=dataset_path, split="train")
+
+        dataset = dataset.add_column("id", list(range(len(dataset))))
         return dataset
 
     def _process_one_sample(self, idx, batch_dict, *args, **kwargs):
@@ -60,9 +62,13 @@ class VidoReDatasetProcessor(VideoDatasetProcessor):
         
         query_description = target_description = None
         if self.query_descriptions is not None:
-            query_description = self.query_descriptions[(query, image_filename, answer)]
+            query_description = self.query_descriptions.get((batch_dict['id'][idx],))
+            if query_description is None:
+                print(f"No query description for id {batch_dict['id'][idx]} for {self.dataset_config['dataset_name']} dataset")
         if self.target_descriptions is not None:
-            target_description = self.target_descriptions[(query, image_filename, answer)]
+            target_description = self.target_descriptions.get((batch_dict['id'][idx],))
+            if target_description is None:
+                print(f"No target description for id {batch_dict['id'][idx]} for {self.dataset_config['dataset_name']} dataset")
 
         return {
             "query_text": query,

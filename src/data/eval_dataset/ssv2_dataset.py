@@ -23,12 +23,9 @@ DATASET_PARSER_NAME = "ssv2"
 class SSV2EvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self, *args,**dataset_config):
 
-        super().__init__(DATASET_PARSER_NAME, *args,
-                         query_key_text=None, query_key_mm='video_id',
-                         cand_key_text='pos_text', cand_key_mm=None,
-                         **dataset_config)
+        super().__init__(DATASET_PARSER_NAME, *args, **dataset_config)
 
-        self.dataset_config['image_resolution'] = dataset_config.image_resolution
+        self.dataset_config['image_resolution'] = self.data_args.image_resolution
 
     def _load_hf_dataset(self):
         dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[self.dataset_name])
@@ -69,6 +66,13 @@ class SSV2EvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         cand_text  = list(cand_list) if isinstance(cand_list, (list, tuple)) else [cand_list]
         cand_image = [None] * len(cand_text)
 
+
+        query_description = None
+        if self.query_descriptions:
+            query_description = self.query_descriptions.get((video_id,))
+            if query_description is None:
+                print(f"No query description for video {video_id} in {self.dataset_config['dataset_name']} dataset")
+
         dataset_info = {
             "cand_names": cand_text,
             "label_name": pos_text,
@@ -80,4 +84,6 @@ class SSV2EvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "cand_text": cand_text,
             "cand_image": cand_image,
             "dataset_infos": dataset_info,
+            "query_description": query_description,
+            "target_description": None,
         }

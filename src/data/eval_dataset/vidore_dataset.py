@@ -5,7 +5,7 @@ from src.data.eval_dataset.base_eval_dataset import RESOLUTION_MAPPING, ImageVid
 from src.data.utils.dataset_utils import load_hf_dataset, sample_dataset, load_qrels_mapping
 from src.model.processor import process_input_text
 from src.utils import print_master
-from ..prompts import VISDOC_QA_RETRIEVAL_INSTRUCTION, VISDOC_EMBED_INSTRUCTION
+from ..prompts import VISDOC_QA_RETRIEVAL_INSTRUCTION, VISDOC_EMBED_INSTRUCTION, VIDORE_QA_RETRIEVAL_DATASETS
 from ..loader.mixed_dataset import AutoPairEvalDataset
 
 # TASK_INST_QRY = "Find a document image that matches the given query:"
@@ -14,27 +14,11 @@ from ..loader.mixed_dataset import AutoPairEvalDataset
 TASK_INST_QRY = ""
 TASK_INST_TGT = ""
 
-VISDOC_QA_RETRIEVAL_DATASETS = [
-    "ViDoRe_arxivqa",
-    "ViDoRe_docvqa",
-    "ViDoRe_infovqa",
-    "ViDoRe_tabfquad",
-    "ViDoRe_tatdqa",
-    "ViDoRe_shiftproject",
-    "ViDoRe_syntheticDocQA_artificial_intelligence",
-    "ViDoRe_syntheticDocQA_energy",
-    "ViDoRe_syntheticDocQA_government_reports",
-    "ViDoRe_syntheticDocQA_healthcare_industry",
-    "ViDoRe_esg_reports_human_labeled_v2",
-    "ViDoRe_biomedical_lectures_v2_multilingual",
-    "ViDoRe_economics_reports_v2_multilingual",
-    "ViDoRe_esg_reports_v2_multilingual",
 
-]
 
 DATASET_PARSER_NAME = "vidore"
 @AutoPairEvalDataset.register(DATASET_PARSER_NAME)
-@AutoPairEvalDataset.register_instruction(VISDOC_QA_RETRIEVAL_DATASETS,
+@AutoPairEvalDataset.register_instruction(VIDORE_QA_RETRIEVAL_DATASETS,
     {'query': VISDOC_QA_RETRIEVAL_INSTRUCTION,
      'target': VISDOC_EMBED_INSTRUCTION})
 class VidoreEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
@@ -44,17 +28,6 @@ class VidoreEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                          query_key_text="query", query_key_mm=None,
                          cand_key_text="query-id", cand_key_mm="video-id",
                          **dataset_config)
-
-    def _add_signature_columns_map_func(self, batch_dict):
-        signature_columns = {
-
-            # @xuanming we assume modality in the order of text, image, video
-            # current assume two modalities max for query and target
-            "query_key_text": batch_dict['question'],
-            "query_key_mm": [os.path.join(subset, video_id) for subset, video_id in zip(batch_dict['subset'], batch_dict['id'])],
-            "cand_key_text": [""] * len(batch_dict['question']),
-            "cand_key_mm": [""] * len(batch_dict['question'])}
-        return batch_dict | signature_columns
     
     def _load_hf_dataset(self):
         hf_dataset_name = EVAL_DATASET_HF_PATH[self.dataset_config['dataset_name']][0]
@@ -68,6 +41,11 @@ class VidoreEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         corpus = load_hf_dataset((hf_dataset_name, "corpus", hf_dataset_split))
         qrels_mapping = load_qrels_mapping(qrels)
         dataset = sample_dataset(dataset, **self.dataset_config)
+
+
+        if self.data_args.debug_prompt:
+            dataset = dataset.select(range(1))
+            corpus = corpus.select(range(1))
         print_master(f"Loaded {self.dataset_config['dataset_name']}")
         print_master(f"#hf_dataset_name={hf_dataset_name}")
         print_master(f"#hf_dataset_split={hf_dataset_split}")
@@ -80,7 +58,7 @@ class VidoreEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         self.dataset_config['qrels_mapping'] = qrels_mapping
 
         corpus = corpus.map(lambda x: self.corpus_prepare(x, **self.dataset_config), batched=True,
-                            batch_size=2048, #num_proc=8,
+                            batch_size=128, #num_proc=8,
                             drop_last_batch=False, load_from_cache_file=False)
         corpus = corpus.select_columns(['cand_text', 'cand_image', 'dataset_infos'])
 
@@ -113,7 +91,10 @@ class VidoreEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                 raise FileNotFoundError(f"Image path {image_path} not found.")
             cand_text.append(process_input_text(TASK_INST_TGT, model_backbone, add_image_token=True))
             if self.target_descriptions:
-                target_description.append(self.target_descriptions[corpus_id])
+                target_desc = self.target_descriptions.get((corpus_id,))
+                if not target_desc:
+                    print(f"No target description found for corpus_id {corpus_id} for {self.dataset_config['dataset_name']}")
+                target_description.append(target_desc)
             else:
                 target_description.append(None)
             cand_image.append(
@@ -155,14 +136,18 @@ class VidoreEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                 image.save(image_path)
 
             if self.apply_chat_template:
-                target_description = self.target_descriptions[corpus_id] if self.target_descriptions else None
-                cand_texts.append(self.format_text_for_chat_template(
+                target_description = None
+                if self.target_descriptions:
+                    target_description = self.target_descriptions.get(corpus_id)
+                    if not target_description:
+                        print(f"Warning: No target description found for corpus_id {corpus_id} for corpus dataset for {self.dataset_config['dataset_name']}")
+                cand_texts.append([self.format_text_for_chat_template(
                     False, 
                     text=self.instruction['target'],
                     image_path=image_path,
                     add_generation_prompt=self.model_args.do_sft_target,
                     description=target_description
-                    ))
+                    )])
             else:
                 cand_texts.append([process_input_text(TASK_INST_TGT, model_backbone, add_image_token=True)])
             cand_images.append([ImageVideoInstance(

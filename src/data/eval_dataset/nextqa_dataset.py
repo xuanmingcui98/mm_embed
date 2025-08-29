@@ -5,7 +5,7 @@ from datasets import load_dataset
 from src.data.eval_dataset.base_eval_dataset import MMEBV2EvalDatasetProcessor
 from src.data.utils.vision_utils import process_video_frames, load_frames, qa_template
 from src.model.processor import VLM_VIDEO_TOKENS
-from ..prompts import TEXT_EMBED_INSTRUCTION, VIDEO_QA_INSTRUCTION
+from ..prompts import TEXT_EMBED_INSTRUCTION, VIDEO_QA_INSTRUCTION, format_qa_with_choices
 from ..loader.mixed_dataset import AutoPairEvalDataset
 
 def process_query(query, prompt, video_token=''):
@@ -33,9 +33,7 @@ DATASET_HF_PATH = "lmms-lab/NExTQA"
 class NextQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self, *args,**dataset_config):
 
-        super().__init__(DATASET_PARSER_NAME, *args,
-                        query_key_text='question', query_key_mm='video', cand_key_text="cand_key_text", cand_key_mm=None,
-                         **dataset_config)
+        super().__init__(DATASET_PARSER_NAME, *args, **dataset_config)
         
     def _load_hf_dataset(self):
         dataset = load_dataset(DATASET_HF_PATH, "MC", split="test")
@@ -64,13 +62,8 @@ class NextQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
 
         options = [a0, a1, a2, a3, a4]
 
-        # Build query and normalized candidate strings
-        q_with_token = process_query(
-            query,
-            prompt=TASK_INST_QRY,
-            video_token=VLM_VIDEO_TOKENS[model_backbone],
-        )
-        query_text, cand_text, _, answer_idx = qa_template(q_with_token, options, answer)
+        _, cand_text, _, answer_idx = qa_template(query, options, answer)
+        query_text = format_qa_with_choices(query, cand_text)
 
         # Paths and frame extraction (if missing)
         video_path = f"{video_root}/{video_id}.mp4"
@@ -120,10 +113,18 @@ class NextQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "qry_frame_paths": qry_frame_paths,
         }
 
+        query_description = None
+        if self.query_descriptions:
+            query_description = self.query_descriptions.get((query, video_id))
+            if not query_description:
+                print(f'No query description found for ({query}, {video_id}) for dataset {self.dataset_config["dataset_name"]}')
+
         return {
             "query_text": query_text,      # string
             "query_image": query_image,    # dict with paths/bytes/resolutions
             "cand_text": cand_text,        # list[str]
             "cand_image": cand_image,      # list[None]
             "dataset_infos": dataset_info, # dict
+            "query_description": query_description,
+            "target_description": None,
         }

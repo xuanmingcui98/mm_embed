@@ -72,7 +72,8 @@ class DataArguments:
     apply_chat_template: bool = field(default=True, metadata={"help": "apply chat template to the dataset"})
     target_description_dir: str = field(default=None, metadata={"help": "directory for target descriptions"})
     debug_prompt: bool = field(default=False, metadata={"help": "debug mode, will not use the dataset_config and will use the dataset_name and subset_name instead"})
-    combine_image_datasets: bool = field(default=False, metadata={"help": "combine image datasets into one dataset"})
+    rewrites_for_mm_only: bool = field(default=True, metadata={"help": "only use rewrites for multi-modal input"})
+    max_rewrite_len: int = field(default=500, metadata={"help": "maximum rewrite length"})
 
 
 @dataclass

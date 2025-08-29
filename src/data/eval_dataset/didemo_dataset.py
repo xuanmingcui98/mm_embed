@@ -20,10 +20,7 @@ DATASET_PARSER_NAME = "didemo"
 class DiDemoEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self, *args, **dataset_config):
 
-        super().__init__(DATASET_PARSER_NAME, *args,
-                         query_key_text="caption", query_key_mm = None,       
-                         cand_key_text=None, cand_key_mm="video",
-                         **dataset_config)
+        super().__init__(DATASET_PARSER_NAME, *args, **dataset_config)
 
     def _load_hf_dataset(self):
         return load_hf_dataset(EVAL_DATASET_HF_PATH[self.dataset_name]), None
@@ -51,9 +48,11 @@ class DiDemoEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         cand_text, cand_image = [], []
         dataset_infos = {"cand_names": [video_name], "label_name": video_name}
 
-        query_description = target_description = None
+        query_description = None
         if self.query_descriptions:
-            query_description = self.query_descriptions[(video_name,)]
+            query_description = self.query_descriptions.get((video_name,))
+            if not query_description:
+                print(f'No query description found for ({video_name},) for dataset {self.dataset_config["dataset_name"]}')
 
         try:
             # Extract & process frames
@@ -82,5 +81,5 @@ class DiDemoEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "cand_image": cand_image,       # list[dict], zipped with cand_text
             "dataset_infos": dataset_infos, # per-sample info
             "query_description": query_description,
-            "target_description": target_description,
+            "target_description": None,
         }

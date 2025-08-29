@@ -13,6 +13,8 @@ import torch.distributed as dist
 import torch.nn.functional as F
 import yaml
 
+os.environ['TZ'] = "America/New_York"
+
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import HfArgumentParser, AutoConfig
@@ -30,7 +32,7 @@ import multiprocessing
 from multiprocessing import Pool, cpu_count
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s [%(name)s:%(lineno)s] %(message)s')
 logger = logging.getLogger(__name__)
-
+logging.getLogger("PIL").setLevel(logging.WARNING)
 
 def pad_dataset_to_divisible(dataset, world_size):
     num_samples = len(dataset)

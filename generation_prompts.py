@@ -1,3 +1,33 @@
+VIDORE_QA_RETRIEVAL_DATASETS = [
+    "ViDoRe_arxivqa",
+    "ViDoRe_docvqa",
+    "ViDoRe_infovqa",
+    "ViDoRe_tabfquad",
+    "ViDoRe_tatdqa",
+    "ViDoRe_shiftproject",
+    "ViDoRe_syntheticDocQA_artificial_intelligence",
+    "ViDoRe_syntheticDocQA_energy",
+    "ViDoRe_syntheticDocQA_government_reports",
+    "ViDoRe_syntheticDocQA_healthcare_industry",
+    "ViDoRe_esg_reports_human_labeled_v2",
+    "ViDoRe_biomedical_lectures_v2_multilingual",
+    "ViDoRe_economics_reports_v2_multilingual",
+    "ViDoRe_esg_reports_v2_multilingual",
+
+    "ViDoSeek-page",
+    "ViDoSeek-doc",
+    "MMLongBench-doc",
+    "MMLongBench-page"
+]
+
+VISRAG_QA_RETRIEVAL_DATASETS = [
+    "VisRAG_ArxivQA",
+    "VisRAG_ChartQA",
+    "VisRAG_MP-DocVQA",
+    "VisRAG_SlideVQA",
+    "VisRAG_InfoVQA",
+    "VisRAG_PlotQA"
+]
 
 prompts = {
     "colpali_train_set": 
@@ -48,8 +78,8 @@ Instructions:
 
 EXAMPLE:
 
-<think>The document lists the top 20 most spoken languages by native speakers, led by Chinese (Mandarin) with 935 million, followed by Spanish (387M), English (365M), Hindi (295M), and Arabic (280M). A pie chart shows each language’s share of the world population, with Chinese at 14.1% and “Other” languages totaling 46.45%. Geographic regions for each language are shown, such as Mandarin in China, Taiwan, and Singapore, and Spanish in Latin America and Spain. Greetings in each language are also displayed.</think>
-Answer: The document ranks the top 20 most spoken languages, shows their population share, and maps their primary regions of use.
+<think>The document presents information on the "Most Spoken Languages in the World". It lists languages by the number of native speakers, with Chinese having 935 million native speakers, followed by Spanish with 387 million, and English with 365 million. The document also shows the percentage of the world population for each language and indicates where each language is mainly spoken around the world.</think>
+Summary: The document lists the most spoken languages in the world by native speakers, including Chinese, Spanish, and English, and shows their percentage of the world population and main regions where they are spoken.
 
 ---
 
@@ -64,14 +94,14 @@ Instructions:
 - Focus on the temporal sequence of events.
 - Avoid subjective opinions, speculation, or stylistic commentary.
 - Wrap the description inside <think> ... </think> tags.
-- On a new line, output a summary in this exact format: Answer: <answer>
+- On a new line, output a summary in this exact format: Summary: <summary>
 
 ---
 
 EXAMPLE:
 
-<think>The video opens with a view of an indoor court marked with various lines, presumably for different sports. There are four red balls aligned on the center line. In subsequent frames, people enter the frame, and a dodgeball game commences. The players are seen throwing balls at one another, maneuvering around the court to avoid being hit, and attempting to catch the balls. The participants vary in their attire, indicating a casual and informal game setting. The color contrasts of the red balls and the colored lines on the floor are visually prominent throughout the video. As the game progresses, players are occasionally hit by a ball and step out of the main play area. There appears to be good-natured interaction between the players, supportive of a friendly game rather than a competitive match.</think>
-Answer: An indoor dodgeball game with players dodging and throwing red balls.
+<think>The video features a medium shot of an older woman with short white hair and fair skin, wearing a white shirt and a purple floral jacket. She speaks directly to the camera, occasionally looking to the right. The setting includes a stone fireplace with a black grate and tools, and a doorway in the background. A small black microphone is clipped to her jacket. The handheld camera gradually zooms in on her as she talks.</think>
+Summary: The video shows an older woman speaking to the camera in front of a fireplace as the camera zooms in.
 
 ---
 
@@ -103,4 +133,34 @@ Answer: The man in the suit appears to be hosting the segment as he holds papers
 Now, answer for the following video and question:
 
 Question: {query}
-Video: <video>"""}
+Video: <video>""",
+
+    "YouCook2":
+"""You are given a cooking video. Your task is to generate a thorough and detailed description of the video content.
+
+Instructions:
+- Focus on the cooking actions, ingredients, and interactions visible in the video.
+- Describe the temporal sequence of steps clearly, capturing how the dish is prepared from start to finish.
+- Avoid subjective opinions, speculation, or stylistic commentary.
+- Wrap the detailed description inside <think> ... </think> tags.
+- On a new line, output a concise summary of the video in this exact format:
+Summary: <summary>
+
+
+EXAMPLE:
+
+<think>The video begins with a close-up of a wooden cutting board where a chef slices red bell peppers into thin strips. Next, the camera shifts to a stovetop view where olive oil is poured into a heated pan, followed by the addition of minced garlic. The peppers are added and sautéed until softened. The chef then sprinkles salt and pepper while stirring with a wooden spatula. In the final scene, the sautéed peppers are transferred into a serving bowl, garnished with fresh parsley, and placed on a countertop alongside toasted bread slices.</think>
+Summary: The video shows a chef slicing bell peppers and sautéing them with garlic and olive oil, finishing with a parsley garnish and serving them alongside bread.
+
+
+Now, generate a detailed description for the following video:
+
+Video: <video>""",}
+
+
+
+for dataset in VIDORE_QA_RETRIEVAL_DATASETS + VISRAG_QA_RETRIEVAL_DATASETS:
+    prompts[dataset] = prompts["visrag-indomain"]
+
+for dataset in ["MSVD", "MSR-VTT", "DiDeMo", "VATEX"]:
+    prompts[dataset] = prompts["video_caption_300k"]

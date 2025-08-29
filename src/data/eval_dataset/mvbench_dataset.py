@@ -11,7 +11,7 @@ from datasets import load_dataset
 from src.data.eval_dataset.base_eval_dataset import MMEBV2EvalDatasetProcessor
 from src.data.utils.vision_utils import process_video_frames, qa_template
 from src.model.processor import VLM_VIDEO_TOKENS
-from ..prompts import TEXT_EMBED_INSTRUCTION, VIDEO_QA_INSTRUCTION
+from ..prompts import TEXT_EMBED_INSTRUCTION, VIDEO_QA_INSTRUCTION, format_qa_with_choices
 from ..loader.mixed_dataset import AutoPairEvalDataset
 
 def process_query(query, prompt, video_token=''):
@@ -111,10 +111,7 @@ DATASET_HF_PATH = "OpenGVLab/MVBench"
      'target': TEXT_EMBED_INSTRUCTION})
 class MVBenchEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self, *args,**dataset_config):
-        super().__init__(DATASET_PARSER_NAME, *args,
-                         query_key_text='question', query_key_mm="video",
-                         cand_key_text='candidates', cand_key_mm=None,
-                         **dataset_config)
+        super().__init__(DATASET_PARSER_NAME, *args, **dataset_config)
 
     def _load_hf_dataset(self):
         subsets = []
@@ -141,13 +138,8 @@ class MVBenchEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         cands_raw      = batch_dict["candidates"][data_idx]
         answer_raw     = batch_dict["answer"][data_idx]
 
-        # Build query + choices and normalize candidates/answer via your template
-        q_with_token = process_query(
-            query_raw,
-            prompt=TASK_INST_QRY,
-            video_token=VLM_VIDEO_TOKENS[model_backbone],
-        )
-        query_text, cand_text, answer, answer_idx = qa_template(q_with_token, cands_raw, answer_raw)
+        _, cand_text, answer, answer_idx = qa_template(query_raw, cands_raw, answer_raw)
+        query_text = format_qa_with_choices(query_raw, cand_text)
 
         # Resolve paths & materialize frames if needed
         subset_info = subset_meta[subset]
@@ -167,7 +159,7 @@ class MVBenchEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             saved_frames = 0
             while saved_frames < max_frames_saved and cap.isOpened():
                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-                ret, frame = cap.read()
+                ret, frame = cap.read() 
                 if not ret:
                     break
                 frame_path = os.path.join(frame_dir, f"{saved_frames:04d}.jpeg")
@@ -191,6 +183,12 @@ class MVBenchEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         # Candidates are text-only (no images)
         cand_image = [None] * len(cand_text)
 
+        query_description = None
+        if self.query_descriptions:
+            query_description = self.query_descriptions.get((query_raw, video_filename))
+            if not query_description:
+                print(f'No query description found for ({query_raw}, {video_filename}) for dataset {self.dataset_config["dataset_name"]}')
+
         dataset_info = {
             "subset": subset,
             "video_id": video_filename,
@@ -209,4 +207,6 @@ class MVBenchEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "cand_text":    cand_text,     # list[str]
             "cand_image":   cand_image,    # list[None], aligned with cand_text
             "dataset_infos": dataset_info, # per-sample metadata
+            "query_description": query_description,
+            "target_description": None,
         }

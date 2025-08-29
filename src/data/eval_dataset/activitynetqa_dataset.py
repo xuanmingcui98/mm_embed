@@ -10,11 +10,11 @@ from src.data.utils.vision_utils import process_video_frames, load_frames
 from src.model.processor import VLM_VIDEO_TOKENS
 import random
 import cv2
-from ..prompts import VIDEO_QA_INSTRUCTION, TEXT_EMBED_INSTRUCTION
+from ..prompts import VIDEO_QA_INSTRUCTION, TEXT_EMBED_INSTRUCTION, format_qa_with_choices
 from ..loader.mixed_dataset import AutoPairEvalDataset
 from ..dataset_hf_path import EVAL_DATASET_HF_PATH
 from src.data.utils.dataset_utils import load_hf_dataset, sample_dataset
-                       
+
 
 def process_query(query, prompt, video_token=''):
     if prompt:
@@ -38,13 +38,10 @@ DATASET_HF_PATH = "lmms-lab/ActivityNetQA"
 class ActivityNetQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self, *args, **dataset_config):
 
-        super().__init__(DATASET_PARSER_NAME, *args, 
-                        query_key_text="question", query_key_mm="video_name",
-                        cand_key_text=None, cand_key_mm=None, **dataset_config)
+        super().__init__(DATASET_PARSER_NAME, *args, **dataset_config)
 
     def _load_hf_dataset(self):
-        # return load_dataset('json', data_files=self.dataset_config["data_path"])['train'], None
-        return load_hf_dataset(EVAL_DATASET_HF_PATH[self.dataset_config['dataset_name']]), None
+        return load_dataset('json', data_files=self.dataset_config["data_path"])['train'], None
 
     def _process_one_sample(self, idx, batch_dict, *args, **kwargs):
 
@@ -58,7 +55,8 @@ class ActivityNetQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             batch_dict['video_name'][idx], batch_dict['question'][idx], \
             batch_dict['answer'][idx], batch_dict['question_id'][idx]
 
-        query = process_query(query + '? (A) yes; (B) no.', prompt=TASK_INST_QRY, video_token=VLM_VIDEO_TOKENS[model_backbone])
+        # query = process_query(query + '? (A) yes; (B) no.', prompt=TASK_INST_QRY, video_token=VLM_VIDEO_TOKENS[model_backbone])
+        query = format_qa_with_choices(query, OPTIONS)
         
         video_path = f'{video_root}/v_{video_name}.mp4'
         frame_dir = f'{frame_root}/v_{video_name}'
@@ -85,9 +83,11 @@ class ActivityNetQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             cap.release()
             # print(f'[{DATASET_PARSER_NAME}] Extracted #frames: {saved_frames}, dumped to {frame_dir}')
 
-        query_description = target_description = None
+        query_description = None
         if self.query_descriptions:
-            query_description = self.query_descriptions[(query, video_name)]
+            query_description = self.query_descriptions.get((query, video_name), None)
+            if not query_description:
+                print(f'No query description found for ({query}, {video_name}) for dataset {self.dataset_config["dataset_name"]}')
         
         qry_frame_paths = process_video_frames(frame_dir, num_frames=num_frames)
         query_images = {"bytes": [None] * len(qry_frame_paths), "paths": qry_frame_paths, "resolutions": [None] * len(qry_frame_paths)}
@@ -110,5 +110,5 @@ class ActivityNetQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "cand_image": cand_images,
             "dataset_infos": dataset_info,
             "query_description": query_description,
-            "target_description": target_description
+            "target_description": None
             }

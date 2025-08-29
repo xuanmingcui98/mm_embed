@@ -22,10 +22,7 @@ DATASET_PARSER_NAME = "vatex"
 class VatexEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self, *args,**dataset_config):
 
-        super().__init__(DATASET_PARSER_NAME, *args,
-                         query_key_text="query_key_text", query_key_mm="videoID",
-                         cand_key_text=None, cand_key_mm="videoID",
-                         **dataset_config)
+        super().__init__(DATASET_PARSER_NAME, *args, **dataset_config)
         
     def _load_hf_dataset(self):
         dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[self.dataset_config['dataset_name']])
@@ -64,6 +61,12 @@ class VatexEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)] * len(frame_paths),
         }]
 
+        target_description = None
+        if self.target_descriptions:
+            target_description = self.target_descriptions.get((video_name,))
+            if target_description is None:
+                print(f"No target description for video {video_name} in {self.dataset_config['dataset_name']} dataset")
+
         dataset_info = {
             "cand_names": [video_name],
             "label_name": video_name,
@@ -75,4 +78,7 @@ class VatexEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "cand_text": cand_text,        # list[str]
             "cand_image": cand_image,      # list[dict]
             "dataset_infos": dataset_info, # dict
+            "query_description": None,
+            "target_description": target_description,
+
         }

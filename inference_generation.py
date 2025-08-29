@@ -14,7 +14,7 @@ from vllm import LLM, SamplingParams
 from PIL import Image
 import hashlib
 import argparse
-from generation_prompts import prompts
+from generation_prompts_qwen import prompts, moment_retrieval_query_prompts
 from src.data.prompts import (IMAGE_TASKS, 
                               VIDEO_TASKS, 
                               VISDOC_TASKS, 
@@ -26,6 +26,7 @@ from src.data.utils.vision_utils import process_video_frames, qa_template
 from src.data.dataset_hf_path import EVAL_DATASET_HF_PATH
 import cv2
 import numpy as np
+from qwen_vl_utils import process_vision_info
 
 import logging
 
@@ -46,6 +47,8 @@ def batch_to_device(batch, device):
             _batch[key] = value
     return _batch
 
+def format_qa_with_choices(query, choices):
+    return query + "\nChoose your answer from the following options:\n" + " ".join(choices)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate descriptions using a language model.")
@@ -65,27 +68,34 @@ def main():
 
     llm = LLM(
         model=args.model_name,
-        trust_remote_code=True,  # Required to load Phi-3.5-vision
-        max_model_len=8192,  # Otherwise, it may not fit in smaller GPUs
-        # limit_mm_per_prompt={"image": 2, "video":1},  # The maximum number to accept
-        tensor_parallel_size=torch.cuda.device_count(),  # Use all available GPUs
-        enforce_eager=True
+        trust_remote_code=True,
+        max_model_len=30_000,  
+        limit_mm_per_prompt={"image": 1, "video":1},  
+        tensor_parallel_size=torch.cuda.device_count(),
+        enforce_eager=torch.cuda.device_count()==1,
+
     )
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name, trust_remote_code=True)
- 
-    if "internvl" in args.model_name.lower():
-        stop_tokens = ["<|endoftext|>", "<|im_start|>", "<|im_end|>", "<|end|>"]
-        stop_token_ids = [tokenizer.convert_tokens_to_ids(i) for i in stop_tokens]
-        stop_token_ids = [token_id for token_id in stop_token_ids if token_id is not None]
 
-    sampling_params = SamplingParams(max_tokens=1024, stop_token_ids=stop_token_ids)
+    sampling_params = SamplingParams(max_tokens=1024)
 
     dataset_names = args.dataset_name.split(",")
 
     for dataset_name in dataset_names:
         dataset_name = dataset_name.strip()
+
+        folder = os.path.join(args.output_folder, dataset_name)
+        if os.path.exists(folder):
+            print(f"Folder {folder} already exists, skipping...")
+            continue
         print(f"==> Processing dataset: {dataset_name}")
+
+        if dataset_name not in ["MomentSeeker", "Charades-STA", "QVHighlight"] + list(IMAGE_TASKS):
+            prompt_template = prompts[dataset_name]
+            prompt_template = prompt_template.replace("<image>", "<|image_pad|>").replace("<video>", "<|video_pad|>")
+        
+
 
         if dataset_name in TRAIN_TASKS:
             with open("configs/train/train_alltasks.yaml", "r") as f:
@@ -95,7 +105,7 @@ def main():
                 elif dataset_name in VISDOC_TASKS:
                     image_dir = None
                 else:
-                    image_dir = config[dataset_name]["image_root"]
+                    image_dir = config[dataset_name]["image_dir"]
         else:
             if dataset_name in VISDOC_TASKS:
                 with open("configs/eval/visdoc.yaml", "r") as f:
@@ -106,7 +116,9 @@ def main():
                     config = yaml.safe_load(f)
                     image_dir = config[dataset_name]["frame_root"]
             else:
-                raise ValueError(f"Please provide image_dir for {dataset_name} dataset")
+                with open("configs/eval/image.yaml", "r") as f:
+                    config = yaml.safe_load(f)
+                    image_dir = config[dataset_name]["image_root"]
 
         if dataset_name in IMAGE_TASKS | VISDOC_TASKS:
             mm_modality = "image"
@@ -114,7 +126,25 @@ def main():
             mm_modality = "video"
 
         query_text_field = target_text_field = mm_field = None
-        if dataset_name == "openbmb/VisRAG-Ret-Train-In-domain-data":
+        if dataset_name in IMAGE_TASKS:
+            dataset = load_dataset("MMEB-eval", dataset_name, split="test")
+            query_text_field = "qry_text"
+            target_text_field = "tgt_text"
+            mm_field = "qry_img_path"
+
+            # if dataset_name in ["VisualNews_i2t", "MSCOCO_i2t"]:
+            #     args.encode_target = "query"
+            # elif dataset_name in ["VisualNews_t2i", "MSCOCO_t2i"]:
+            #     args.encode_target = 'target'
+            #     key_fields = ['tgt_img_path']
+            # elif dataset_name in ["ImageNet-1K", "ImageNet_1K", "ImageNet-A", "ImageNet-R", "VOC2007", "ObjectNet"]:
+            #     args.encode_target = "query"
+
+            args.encode_target = "query"
+            key_fields = ['qry_text', 'qry_img_path']
+            image_dir = "/home/xuanmingcui/datasets/MMEB-eval/eval_images/"
+
+        elif dataset_name == "openbmb/VisRAG-Ret-Train-In-domain-data":
             dataset = load_dataset(dataset_name, split="train")
             key_fields = ['query', 'image', 'source']
             mm_field = "image"
@@ -127,13 +157,15 @@ def main():
             mm_field = 'image'
             args.encode_target = "query"
         elif dataset_name == "ActivityNetQA":
-            dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[dataset_name])
-            dataset = dataset.add_column("answer", ["yes"] * len(dataset))
+            dataset = load_dataset('json', data_files=config["data_path"])['train']
             key_fields = ['question', 'video_name']
             query_text_field = "question"
-            target_text_field = "answer"
             mm_field = 'video_name'
             args.encode_target = "query"
+            def func(row):
+                row['question'] = format_qa_with_choices(row['question'], ['yes', 'no'])
+                return row
+            dataset = dataset.map(func)
         elif dataset_name == "DiDeMo":
             dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[dataset_name])
             key_fields = ['video_rel']
@@ -143,14 +175,14 @@ def main():
             dataset = dataset.map(func)
             args.encode_target = "target"
         elif dataset_name == "EgoSchema":
-            dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[dataset_name])
-            options = ['A', 'B', 'C', 'D']
-            dataset = dataset.add_column("answer", [options[int(x)] for x in dataset["answer"]])
+            dataset = load_dataset("lmms-lab/egoschema", "Subset", split="test")
             key_fields = ['question', 'video_idx']
             mm_field = 'video_idx'
             query_text_field = "question"
-            target_text_field = "answer"
             args.encode_target = "query"
+            def func(row):
+                row['question'] = format_qa_with_choices(row['question'], row['option'])
+                return row
         elif dataset_name in ["QVHighlight", "Charades-STA"]:
             dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[dataset_name])
             def func(row):
@@ -158,24 +190,27 @@ def main():
                 if args.encode_target == 'query':
                     row['video_filename'] = os.path.join(row['video_filename'], "query")
                 else:
-                    row['video_filename'] = [os.listdir(os.path.join(row['video_filename'], filename)) for filename in os.listdir(os.path.join(image_dir, row['video_filename'])) if filename != "query"]
+                    row['video_filename'] = [os.path.join(row['video_filename'], filename) for filename in os.listdir(os.path.join(image_dir, row['video_filename'])) if filename != "query"]
                 return row
             dataset = dataset.map(func)
             if args.encode_target == 'query':
                 key_fields = ["query", "video_filename"]
                 query_text_field = "query"
                 mm_field = 'video_filename'
+                prompt_template = moment_retrieval_query_prompts[dataset_name]
             else:
                 key_fields = ["video_filename"]
                 mm_field = 'video_filename'
                 query_text_field = None
                 target_text_field = None
+                prompt_template = prompts['video_caption_300k']
         elif dataset_name == "MomentSeeker":
             dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[dataset_name])
             if args.encode_target == "query":
                 key_fields = ['query', 'input_frames']
                 mm_field = "input_frames"
                 query_text_field = "query"
+                prompt_template = moment_retrieval_query_prompts[dataset_name]
                 def func(row):
                     input_frames = row['input_frames']
                     if isinstance(input_frames, str) and input_frames.endswith(".mp4"):
@@ -190,11 +225,12 @@ def main():
                     return row
             else:
                 key_fields = ["video_filename"]
+                prompt_template = prompts['video_caption_300k']
                 def func(row):
                     raw_frames = row["positive_frames"] + row["negative_frames"]
                     row['video_filename'] = []
                     for file in raw_frames:
-                        clip_name = file.replace("/", "_").split(".mp4")[0]
+                        clip_name = file['output_path'].replace("/", "_").split(".mp4")[0]
                         clip_name = os.path.join("video_frames", clip_name)
                         row['video_filename'].append(clip_name)
                     row['mm_modality'] = "video"
@@ -217,7 +253,8 @@ def main():
                 cands_raw      = row["candidates"]
                 answer_raw     = row["answer"]
 
-                query_text, cand_text, answer, answer_idx = qa_template(query_raw, cands_raw, answer_raw)
+                _, cand_text, answer, answer_idx = qa_template(query_raw, cands_raw, answer_raw)
+                query_text = format_qa_with_choices(query_raw, cand_text)
                 row['query'] = query_text
                 row['video_filename'] = os.path.join(subset, video_filename)
                 return row
@@ -255,7 +292,8 @@ def main():
                 a4       = row["a4"]
 
                 options = [a0, a1, a2, a3, a4]
-                query_text, cand_text, _, answer_idx = qa_template(query, options, answer)
+                _, cand_text, _, answer_idx = qa_template(query, options, answer)
+                query_text = format_qa_with_choices(query, cand_text)
                 row['query'] = query_text
                 return row
         
@@ -268,7 +306,6 @@ def main():
             dataset = sample_dataset(dataset, num_sample_per_subset=1000)
             mm_field = "video_id"
             key_fields = ['video_id']
-        
         elif dataset_name == "VATEX":
             args.encode_target = "target"
             dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[dataset_name])
@@ -281,13 +318,13 @@ def main():
             key_fields = ['video_id']
         elif dataset_name == "Video-MME":
             args.encode_target = "query"
-            dataset = load_hf_dataset("lmms-lab/Video-MME", split="test")
+            dataset = load_dataset("lmms-lab/Video-MME", split="test")
             mm_field = "videoID"
             key_fields = ['question', 'videoID']
             query_text_field = "query_text"
 
             def func(row):
-                row['query_text'] = row['question'] + "\n" + "\n".join(options)
+                row['query_text'] = row['question'] + "\n" + "\n".join(row['options'])
                 return row
             dataset = dataset.map(func)
 
@@ -371,7 +408,7 @@ def main():
         if args.encode_target == "target" and isinstance(dataset[0][key_fields[0]], list):
             paired_dataset = set()
             for row in dataset:
-                for i in len(dataset[0][key_fields[0]]):
+                for i in range(len(dataset[0][key_fields[0]])):
                     paired_dataset.add(tuple([row[key_fields[x][i]] for x in range(len(key_fields))]))
             
             paired_dataset = sorted(list(paired_dataset))
@@ -382,7 +419,7 @@ def main():
         if args.n_partitions > 1:
             dataset = dataset.shard(num_shards=args.n_partitions, index=args.current_partition-1)
 
-        folder = os.path.join("descriptions", dataset_name, "cot")
+        folder = os.path.join(args.output_folder, dataset_name, "cot")
         os.makedirs(folder, exist_ok=True)
 
         # load existing descriptions
@@ -404,7 +441,7 @@ def main():
             for f in intermediate_files:
                 for line in open(os.path.join(folder, f), "r"):
                     line = json.loads(line)
-                    descriptions[line['key']] = line["response"]
+                    descriptions[tuple(line['key'])] = line["response"]
 
         dataset_unprocessed_idx = []
 
@@ -419,9 +456,6 @@ def main():
                 
         print(dataset)
 
-        prompt_template = prompts[dataset_name]
-        print(prompt_template)
-
         intermediates = open(os.path.join(folder, f"{args.encode_target}_intermediates_{args.current_partition}-{args.n_partitions}_{str(os.environ.get('SLURM_JOB_ID'))}.jsonl"), "a") 
         
         with torch.no_grad():
@@ -431,38 +465,65 @@ def main():
                 bs = len(next(iter(batch.values())))
                 dummy_inputs = [''] * bs
                 query_text_inputs, target_text_inputs = batch.get(query_text_field, dummy_inputs), batch.get(target_text_field, dummy_inputs)
-                text_inputs = [prompt_template.format(query=query_text, target=target_text) for query_text, target_text in zip(query_text_inputs, target_text_inputs)]
-
+                if dataset_name in IMAGE_TASKS:
+                    text_inputs = [x.replace("<|image_1|>\n", "") for x in query_text_inputs]
+                else:
+                    text_inputs = [prompt_template.format(query=query_text, target=target_text) for query_text, target_text in zip(query_text_inputs, target_text_inputs)]
+                modalities = batch['modality']
                 raw_mm_inputs = batch.get(mm_field)
                 mm_inputs = []
-                if raw_mm_inputs is not None:
-                    for mm_input in raw_mm_inputs:
-                        mm_input = os.path.join(image_dir, mm_input) if isinstance(mm_input, str) else mm_input
-                        if isinstance(mm_input, str) and mm_modality == "image":
-                            mm_inputs.append(Image.open(os.path.join(image_dir, mm_input)))
-                        elif isinstance(mm_input, str) and mm_modality == "video" and os.path.isdir(mm_input):
-                            frame_paths = process_video_frames(mm_input, num_frames=8)
-                            # read as a numpy array
-                            np_frames = [cv2.imread(frame_path) for frame_path in frame_paths]
-                            mm_inputs.append(np.array(np_frames))
-                        elif isinstance(mm_input, Image.Image):
-                            mm_inputs.append(mm_input)
-                        else:
-                            raise ValueError(f"Unsupported mm_inputs type: {type(mm_inputs[0])}")
+
+                for idx, mm_input in enumerate(raw_mm_inputs):
+                    
+                    if not mm_input:
+                        mm_inputs.append(None)
+                        continue
+
+                    mm_modality = batch['modality'][idx]
+                    mm_input = os.path.join(image_dir, mm_input) if isinstance(mm_input, str) else mm_input
+                    if isinstance(mm_input, str) and mm_modality == "image":
+                        mm_inputs.append(Image.open(os.path.join(image_dir, mm_input)))
+                    elif isinstance(mm_input, str) and mm_modality == "video" and os.path.isdir(mm_input):
+                        frame_paths = process_video_frames(mm_input, num_frames=8)
+                        # read as a numpy array
+                        # np_frames = [cv2.cvtColor(cv2.imread(frame_path), cv2.COLOR_BGR2RGB) for frame_path in frame_paths]
+                        mm_inputs.append([Image.open(frame_path) for frame_path in frame_paths])
+                        # mm_inputs.append(np.array(np_frames))
+                    elif isinstance(mm_input, Image.Image):
+                        mm_inputs.append(mm_input)
+                    else:
+                        raise ValueError(f"Unsupported mm_inputs type: {type(mm_inputs[0])}")
 
                 formatted_inputs = []
 
-                for qry_text, qry_mm in zip(text_inputs, mm_inputs):
+                for qry_text, qry_mm, modality in zip(text_inputs, mm_inputs, modalities):
                     if qry_mm is not None:
+                        video_messages = [
+                            # {"role": "system", "content": "You are a helpful assistant."},
+                            {"role": "user", "content": [
+                                    {"type": "text", "text": qry_text},
+                                    {"type": modality, modality: qry_mm} 
+                                ]
+                            },
+                        ]
+                        image_inputs, video_inputs = process_vision_info(video_messages)
+
+                        qry_mm = image_inputs if modality == "image" else video_inputs
                         formatted_inputs.append(
-                            {"prompt": tokenizer.apply_chat_template([{"role": "user", "content": qry_text}], add_generation_prompt=True, tokenize=False),
+                            {"prompt": tokenizer.apply_chat_template(video_messages, add_generation_prompt=True, tokenize=False),
                             "multi_modal_data": {mm_modality: qry_mm}}
                         )
                     else:
+                        messages = [
+                            {"role": "user", "content": [
+                                    {"type": "text", "text": qry_text},
+                                ]
+                            },
+                        ]
                         formatted_inputs.append(
-                            {"prompt": tokenizer.apply_chat_template([{"role": "user", "content": qry_text}], add_generation_prompt=True, tokenize=False)}
+                            {"prompt": tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)}
                         )
-                        
+                
                 responses = llm.generate(formatted_inputs, sampling_params=sampling_params,)
 
                 keys = [tuple([batch[x][i] for x in key_fields]) for i in range(bs)]

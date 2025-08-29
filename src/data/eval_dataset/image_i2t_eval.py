@@ -1,10 +1,10 @@
 from src.data.eval_dataset.base_eval_dataset import MMEBEvalDatasetProcessor
-from ..loader.mixed_dataset import AutoPairDataset
+from ..loader.mixed_dataset import AutoPairEvalDataset
 from ..prompts import TEXT_EMBED_INSTRUCTION, IMAGE_EMBED_INSTRUCTION
 
 DATASET_PARSER_NAME = "image_i2t"
-@AutoPairDataset.register(DATASET_PARSER_NAME)
-@AutoPairDataset.register_instruction(["VisualNews_i2t", "MSCOCO_i2t"],
+@AutoPairEvalDataset.register(DATASET_PARSER_NAME)
+@AutoPairEvalDataset.register_instruction(["VisualNews_i2t", "MSCOCO_i2t"],
     {'query': IMAGE_EMBED_INSTRUCTION,
     'target': TEXT_EMBED_INSTRUCTION })
 class ImageI2TEvalDatasetProcessor(MMEBEvalDatasetProcessor):

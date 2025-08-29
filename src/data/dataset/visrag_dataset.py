@@ -42,7 +42,7 @@ target_source2prompt = {
 TASK_INST_TGT = "Represent the following text:\n"
 DATASET_PARSER_NAME = "visrag"
 @AutoPairDataset.register(DATASET_PARSER_NAME)
-@AutoPairDataset.register_instruction("openbmb/VisRAG-Ret-Train-In-domain-data", 
+@AutoPairDataset.register_instruction("VisRag-Indomain-data", 
     {'query': VISDOC_QA_RETRIEVAL_INSTRUCTION,
      'target': VISDOC_EMBED_INSTRUCTION})
 class VisragDatasetProcessor(VideoDatasetProcessor):
@@ -55,9 +55,11 @@ class VisragDatasetProcessor(VideoDatasetProcessor):
         dataset_path = self.dataset_config.get("dataset_path", None)
 
         if dataset_name:
-            dataset = load_dataset(dataset_name, split=dataset_split)
+            dataset = load_dataset("openbmb/VisRAG-Ret-Train-In-domain-data", split=dataset_split)
         elif dataset_path:
             dataset = load_dataset("parquet", data_files=dataset_path, split="train")
+        
+        dataset = dataset.add_column("id", list(range(len(dataset))))
         return dataset
 
     def _process_one_sample(self, idx, batch_dict, *args, **kwargs):
@@ -79,6 +81,19 @@ class VisragDatasetProcessor(VideoDatasetProcessor):
             image_bytes = image['bytes']
             path = image['path']
         pos_image = {"bytes": [image_bytes], "paths": [path], "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]}
-        return {"query_text": query, "query_image": None,
-                "pos_text": pos_text, "pos_image": pos_image,
-                "neg_text": "", "neg_image": None}
+
+
+        target_description = None
+        if self.target_descriptions:
+            target_description = self.target_descriptions.get((batch_dict['id'][idx],))
+            if target_description is None:
+                print(f"No target description found for id {batch_dict['id'][idx]} for {self.dataset_config['dataset_name']} dataset")
+                
+        return {"query_text": query, 
+                "query_image": None,
+                "pos_text": pos_text, 
+                "pos_image": pos_image,
+                "neg_text": "", 
+                "neg_image": None,
+                "query_description": None,
+                "target_description": target_description}

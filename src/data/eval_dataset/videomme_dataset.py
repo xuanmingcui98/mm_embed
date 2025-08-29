@@ -5,7 +5,7 @@ from datasets import load_dataset
 from src.data.eval_dataset.base_eval_dataset import MMEBV2EvalDatasetProcessor
 from src.data.utils.vision_utils import process_video_frames, load_frames
 from src.model.processor import VLM_VIDEO_TOKENS
-from ..prompts import TEXT_EMBED_INSTRUCTION, VIDEO_QA_INSTRUCTION
+from ..prompts import TEXT_EMBED_INSTRUCTION, VIDEO_QA_INSTRUCTION, format_qa_with_choices
 from ..loader.mixed_dataset import AutoPairEvalDataset
 
 def process_query(query, prompt, video_token=''):
@@ -36,17 +36,6 @@ class VideoMMMEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                          query_key_text='question', query_key_mm='videoID', cand_key_text=None, cand_key_mm='options',
                          **dataset_config)
 
-    def _add_signature_columns_map_func(self, batch_dict):
-        signature_columns = {
-
-            # @xuanming we assume modality in the order of text, image, video
-            # current assume two modalities max for query and target
-            "query_key_text": batch_dict['question'],
-            "query_key_mm": batch_dict['videoID'],
-            "cand_key_text": [""] * len(batch_dict['question']),
-            "cand_key_mm": [""] * len(batch_dict['question'])}
-        return batch_dict | signature_columns
-
     def _load_hf_dataset(self):
         return load_dataset(DATASET_HF_PATH, split="test"), None
 
@@ -67,12 +56,7 @@ class VideoMMMEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         domain       = batch_dict["domain"][data_idx]
         sub_category = batch_dict["sub_category"][data_idx]
 
-        # Build query text with options included
-        query_text = process_query(
-            query + "\n" + "\n".join(options),
-            prompt=TASK_INST_QRY,
-            video_token=VLM_VIDEO_TOKENS[model_backbone],
-        )
+        query_text = format_qa_with_choices(query, options)
 
         # Paths & frame extraction (if missing)
         video_path = f"{video_root}/{video_id}.mp4"
@@ -114,6 +98,12 @@ class VideoMMMEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         ans_idx   = OPTIONS.index(answer)
         label_str = options[ans_idx]
 
+        query_description = None
+        if self.query_descriptions:
+            query_description = self.query_descriptions.get((query, video_id), None)
+            if query_description is None:
+                print(f"No query description for video {video_id} in {self.dataset_config['dataset_name']} dataset")
+
         dataset_info = {
             "question_id": question_id,
             "video_id": video_id,
@@ -133,4 +123,6 @@ class VideoMMMEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "cand_text": cand_text,        # list[str]
             "cand_image": cand_image,      # list[None]
             "dataset_infos": dataset_info, # dict
+            "query_description": query_description,
+            "target_description": None,
         }

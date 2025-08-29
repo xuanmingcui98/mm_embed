@@ -8,7 +8,7 @@ from datasets import load_dataset, concatenate_datasets, Dataset, Features, Valu
 from src.model.processor import PHI3V, VLM_IMAGE_TOKENS
 from src.utils import print_master, print_rank
 # from torch.utils.data import Dataset
-from ..prompts import (get_query, get_target, 
+from ..prompts import (
                        IMAGE_TASKS, VIDEO_TASKS, VISDOC_TASKS,
                        format_description, 
                        extract_query, extract_target)
@@ -119,8 +119,6 @@ class BaseEvalDatasetProcessor:
                  data_args, 
                  training_args, 
                  processor,
-                 query_key_text=None, query_key_mm=None,
-                 cand_key_text=None, cand_key_mm=None,
                  instruction = None,
                  **dataset_config):
         self.model_args = model_args
@@ -129,10 +127,6 @@ class BaseEvalDatasetProcessor:
         self.processor = processor
         self.dataset_config = dataset_config
         self.data_parser_name = data_parser_name
-        self.query_key_text = query_key_text
-        self.query_key_mm = query_key_mm
-        self.cand_key_text = cand_key_text
-        self.cand_key_mm = cand_key_mm
 
         self.dataset_name = self.dataset_config.get("dataset_name")
         self.dataset_split = self.dataset_config.get("dataset_split", "test")
@@ -140,6 +134,9 @@ class BaseEvalDatasetProcessor:
         self.dataset_config['image_resolution'] = data_args.image_resolution
         self.apply_chat_template = data_args.apply_chat_template
         self.instruction = instruction
+
+        if self.data_args.debug_prompt:
+            self.dataset_config['num_sample_per_subset'] = 1
 
         self.model_backbone = self.dataset_config['model_backbone']
 
@@ -152,14 +149,14 @@ class BaseEvalDatasetProcessor:
 
         self.query_descriptions = self.target_descriptions = None
         if data_args.query_description_dir is not None and not model_args.do_sft_query:
-            desc_path = os.path.join(data_args.query_description_dir, self.subset_name, "cot", "query.pkl")
+            desc_path = os.path.join(data_args.query_description_dir, self.dataset_name, "cot", "query.pkl")
             if os.path.exists(desc_path):
                 with open(desc_path, "rb") as f:
                     self.query_descriptions = pickle.load(f)
 
 
         if data_args.target_description_dir is not None and not model_args.do_sft_target:
-            desc_path = os.path.join(data_args.target_description_dir, self.subset_name, "cot", "target.pkl")
+            desc_path = os.path.join(data_args.target_description_dir, self.dataset_name, "cot", "target.pkl")
             if os.path.exists(desc_path):
                 with open(desc_path, "rb") as f:
                     self.target_descriptions = pickle.load(f)
@@ -252,15 +249,16 @@ class BaseEvalDatasetProcessor:
         if instruction is not None and self.dataset_config['dataset_name'] != "MomentSeeker": # hacky here. momentseeker has mixed inputs
             text = instruction.format(text=text)
 
-        # make sure no extra visual tokens are left in the text
-        text = text.replace(VLM_IMAGE_TOKENS[self.model_backbone], "")
-        text = text.replace(VLM_VIDEO_TOKENS[self.model_backbone], "").strip()
+        for img_tok in VLM_IMAGE_TOKENS.values():
+            text = text.replace(img_tok, "")
+        for vid_tok in VLM_VIDEO_TOKENS.values():
+            text = text.replace(vid_tok, "")
 
         description = format_description(description, self.data_args.prompt_format)
 
         formatted_sample = [
             {"role": "system",
-            "content": [{"type": "text", "text": "You are a helpful assistant."}],}
+            "content": "You are a helpful assistant specialized in multimodal embedding."}
         ]
         user_content = [] 
         if image_path:
@@ -291,14 +289,8 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
     It processes the dataset for MMEB evaluation tasks, including query and target descriptions.
     """
 
-    def __init__(self, *args, 
-                 query_key_text="qry_text", query_key_mm="qry_img_path",
-                 cand_key_text="tgt_text", cand_key_mm="tgt_img_path",
-                 **kwargs):
-        super().__init__(*args, 
-                        query_key_text=query_key_text, query_key_mm=query_key_mm,
-                        cand_key_text=cand_key_text, cand_key_mm=cand_key_mm, 
-                        **kwargs)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         
         self.data_parser_name = "mmeb_eval"
         self.subset_name = self.dataset_config.get("dataset_name")
@@ -352,7 +344,6 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
 
                 query_description = self.query_descriptions[(qry_text, qry_image_path)] if self.query_descriptions is not None else None
 
-                qry_text = self.instruction['query'].format(text=extract_query(qry_text, self.subset_name))
                 qry_text = self.format_text_for_chat_template(True, 
                                                               text=qry_text, 
                                                               image_path=qry_image_path, 
@@ -362,10 +353,9 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
                 for tgt_cap, tgt_img_path in zip(tgt_texts, tgt_image_paths):
                     if (tgt_cap, tgt_img_path) not in self.target_cache:
                         target_description = self.target_descriptions[(tgt_cap, tgt_img_path)] if self.target_descriptions is not None else None
-                        tgt_text = self.instruction['target'].format(text=extract_target(tgt_cap, self.subset_name))
                         self.target_cache[(tgt_cap, tgt_img_path)] = self.format_text_for_chat_template(
                                                                         False, 
-                                                                        text=tgt_text, 
+                                                                        text=tgt_cap, 
                                                                         image_path=tgt_img_path, 
                                                                         add_generation_prompt=self.model_args.do_sft_target,
                                                                         description=target_description)
@@ -432,6 +422,9 @@ class MMEBV2EvalDatasetProcessor(BaseEvalDatasetProcessor):
                                     description=query_description)
                 
                 cands = []
+
+                if not isinstance(target_description, list):
+                    target_description = [target_description] * len(cand_text)
                 for single_cand_text, single_cand_image, single_tasrget_description in zip(cand_text, cand_image, target_description):
                     cand_image_input = cand_video_input = None
                     if single_cand_image:

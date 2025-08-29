@@ -71,16 +71,22 @@ def main():
     setattr(training_args, 'model_backbone', "qwen2_vl")
     setattr(model_args, "model_backbone", "qwen2_vl")
     train_dataset = init_mixed_dataset(dataset_config, model_args, data_args, training_args, processor)
+
+    system_prompt = "\n\nYou are a helpful language and vision assistant. You are able to understand the visual content that the user provides, and assist the user with a variety of tasks using natural language."
     for row in train_dataset:
         if row['global_dataset_name'] not in prompts:
             print(f"Dataset: {row['global_dataset_name']}")
             print(f"Query: {row['query_text']}")
             print(f"Target: {row['pos_text']}")
+            row['query_text'] = row['query_text'].replace(system_prompt, "").strip()
+            row['pos_text'] = row['pos_text'].replace(system_prompt, "").strip()
             prompts[row['global_dataset_name']] = (row['query_text'], row['pos_text'])
 
     filename = "training_prompts_unified"
     if data_args.apply_chat_template:
         filename += "_chat"
+    if data_args.query_description_dir or data_args.target_description_dir:
+        filename += "_desc"
     json.dump(prompts, open(f"{filename}.json", 'w'), indent=4)
 
 

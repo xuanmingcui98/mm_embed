@@ -22,10 +22,7 @@ DATASET_PARSER_NAME = "msvd"
 class MSVDEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self, *args,**dataset_config):
 
-        super().__init__(DATASET_PARSER_NAME, *args,
-                         query_key_text='caption', query_key_mm=None,
-                         cand_key_text=None, cand_key_mm='video_id',
-                         **dataset_config)
+        super().__init__(DATASET_PARSER_NAME, *args, **dataset_config)
     
     def _load_hf_dataset(self):
         return load_hf_dataset(EVAL_DATASET_HF_PATH[self.dataset_config['dataset_name']]), None
@@ -56,7 +53,12 @@ class MSVDEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         query_text  = process_input_text(TASK_INST_QRY, model_backbone, text=caption_text)
         query_image = None
 
-        target_description = self.target_descriptions[(video_name,)] if self.target_descriptions else None
+
+        target_description = None
+        if self.target_descriptions:
+            target_description = self.target_descriptions.get((video_name,))
+            if not target_description:
+                print(f'No target description found for ({video_name},) for dataset {self.dataset_config["dataset_name"]}')
 
         cand_text = [process_input_text(TASK_INST_TGT, model_backbone, add_video_token=True)]
         cand_image = [{

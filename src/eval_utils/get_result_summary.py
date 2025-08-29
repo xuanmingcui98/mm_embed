@@ -36,7 +36,7 @@ def get_result_summary(dir):
             "VisDial", "CIRR", "VisualNews_t2i", "VisualNews_i2t", "MSCOCO_t2i", "MSCOCO_i2t", "NIGHTS", "WebQA", "FashionIQ", "Wiki-SS-NQ", "OVEN", "EDIS",
             "MSCOCO", "RefCOCO", "RefCOCO-Matching", "Visual7W-Pointing"],
         "video": [
-            "K700", "SmthSmthV2", "HMDB51", "UCF101", "Breakfast",
+            "Kinetics-700", "SmthSmthV2", "HMDB51", "UCF101", "Breakfast",
             "MVBench", "Video-MME", "NExTQA", "EgoSchema", "ActivityNetQA",
             "DiDeMo", "MSR-VTT", "MSVD", "VATEX", "YouCook2",
             "QVHighlight", "Charades-STA", "MomentSeeker",

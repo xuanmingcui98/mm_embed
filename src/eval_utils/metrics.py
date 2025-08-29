@@ -3,7 +3,6 @@ import logging
 from typing import Dict
 
 import numpy as np
-import pytrec_eval
 
 
 logger = logging.getLogger(__name__)

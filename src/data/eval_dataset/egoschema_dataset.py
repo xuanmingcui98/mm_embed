@@ -7,7 +7,9 @@ from src.data.eval_dataset.base_eval_dataset import MMEBV2EvalDatasetProcessor
 from src.data.utils.vision_utils import process_video_frames, load_frames
 from src.model.processor import VLM_VIDEO_TOKENS
 import cv2
-from ..prompts import (TEXT_EMBED_INSTRUCTION, VIDEO_QA_INSTRUCTION)
+from ..prompts import (TEXT_EMBED_INSTRUCTION, 
+                       VIDEO_QA_INSTRUCTION, 
+                       format_qa_with_choices)
 from ..loader.mixed_dataset import AutoPairEvalDataset
 
 def process_query(query, prompt, video_token=''):
@@ -30,10 +32,7 @@ DATASET_HF_PATH = "lmms-lab/egoschema"
 class EgoSchemaEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self, *args, **dataset_config):
 
-        super().__init__(DATASET_PARSER_NAME, *args,
-                         query_key_text="question", query_key_mm="video_idx",
-                         cand_key_text="option", cand_key_mm=None,
-                         **dataset_config)
+        super().__init__(DATASET_PARSER_NAME, *args, **dataset_config)
         
     def _load_hf_dataset(self):
         return load_dataset(DATASET_HF_PATH, "Subset", split="test"), None
@@ -53,12 +52,7 @@ class EgoSchemaEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         question_idx = batch_dict["question_idx"][data_idx]
         options      = batch_dict["option"][data_idx]
 
-        # Build query text (original concatenates options into the prompt)
-        query = process_query(
-            question + " " + " ".join(options),
-            prompt=TASK_PROMPT,
-            video_token=VLM_VIDEO_TOKENS[model_backbone],
-        )
+        query = format_qa_with_choices(question, options)
 
         # Paths
         video_path = f"{video_root}/{video_idx}.mp4"
@@ -100,9 +94,11 @@ class EgoSchemaEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         cand_text  = [o[o.find(". "):].strip(". ") for o in options]  # mirrors original slicing
         cand_image = [None] * len(options)
 
-        query_description = target_description = None
+        query_description = None
         if self.query_descriptions:
-            query_description = self.query_descriptions[(question, video_idx)]
+            query_description = self.query_descriptions.get((question, video_idx))
+            if not query_description:
+                print(f'No query description found for ({question}, {video_idx}) for dataset {self.dataset_config["dataset_name"]}')
 
         dataset_info = {
             "question_id": question_idx,
@@ -122,5 +118,5 @@ class EgoSchemaEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "cand_image": cand_image,   # list[None], zipped with cand_text
             "dataset_infos": dataset_info,
             "query_description": query_description,
-            "target_description": target_description,
+            "target_description": None,
         }

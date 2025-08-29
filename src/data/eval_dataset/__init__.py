@@ -36,6 +36,7 @@ from .image_t2i_eval import ImageT2IEvalDatasetProcessor
 from .image_i2t_eval import ImageI2TEvalDatasetProcessor
 from .image_i2i_vg_dataset import ImageI2IVGEvalDatasetProcessor
 
+
 # VisDoc
 from .vidore_dataset import VidoreEvalDatasetProcessor
 from .visrag_dataset import VisRAGEvalDatasetProcessor

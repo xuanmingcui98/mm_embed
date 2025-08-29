@@ -4,7 +4,7 @@ import os.path
 import sys
 import os
 
-os.environ['TZ'] = "America/Los_Angeles"
+os.environ['TZ'] = "America/New_York"
 
 logging.basicConfig(
     level=logging.INFO, format='[%(asctime)s] %(levelname)s [%(name)s:%(lineno)s] %(message)s',
@@ -30,7 +30,7 @@ from transformers import modeling_utils
 if not hasattr(modeling_utils, "ALL_PARALLEL_STYLES") or modeling_utils.ALL_PARALLEL_STYLES is None:
     modeling_utils.ALL_PARALLEL_STYLES = ["tp", "none","colwise",'rowwise']
 
-
+logging.getLogger("PIL").setLevel(logging.WARNING)
     
 original_tqdm_init = tqdm.__init__
 

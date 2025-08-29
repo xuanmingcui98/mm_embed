@@ -92,20 +92,15 @@ class BaseDatasetProcessor:
         self.image_resolution = self.dataset_config.get('image_resolution')
         self.instruction = instruction
 
-        self.query_key_text = query_key_text
-        self.query_key_mm = query_key_mm
-        self.cand_key_text = cand_key_text
-        self.cand_key_mm = cand_key_mm
-
         self.query_descriptions = self.target_descriptions = None
         if data_args.query_description_dir is not None:
-            desc_path = os.path.join(data_args.query_description_dir, self.dataset_name, "cot", "query.pkl")
+            desc_path = os.path.join(data_args.query_description_dir, self.subset_name, "cot", "query.pkl")
             if os.path.exists(desc_path):
                 with open(desc_path, "rb") as f:
                     self.query_descriptions = pickle.load(f)
 
         if data_args.target_description_dir is not None:
-            desc_path = os.path.join(data_args.target_description_dir, self.dataset_name, "cot", "target.pkl")
+            desc_path = os.path.join(data_args.target_description_dir, self.subset_name, "cot", "target.pkl")
             if os.path.exists(desc_path):
                 with open(desc_path, "rb") as f:
                     self.target_descriptions = pickle.load(f)
@@ -213,15 +208,24 @@ class BaseDatasetProcessor:
 
         text = extract_fn(text, self.subset_name)
         # make sure no extra visual tokens are left in the text
-        text = text.replace(VLM_IMAGE_TOKENS[self.model_backbone], "")
-        text = text.replace(VLM_VIDEO_TOKENS[self.model_backbone], "").strip()
+        for img_tok in VLM_IMAGE_TOKENS.values():
+            text = text.replace(img_tok, "")
+        for vid_tok in VLM_VIDEO_TOKENS.values():
+            text = text.replace(vid_tok, "")
 
         if instruction is not None:
             text = instruction.format(text=text)
 
         description = format_description(description, self.data_args.prompt_format)
 
-        formatted_sample = []
+        if self.data_args.max_rewrite_len:
+            description = " ".join(description.split()[:self.data_args.max_rewrite_len])
+
+        formatted_sample = [
+            {"role": "system",
+            "content": "You are a helpful assistant specialized in multimodal embedding."}
+        ]
+        
         user_content = [] 
         if image_path:
             user_content.append({"type": "image", "image": image_path})
@@ -264,6 +268,11 @@ class BaseDatasetProcessor:
                     query_description = self.query_descriptions[(qry_text, qry_image_path)]
                 if self.target_descriptions:
                     pos_description = self.target_descriptions[(pos_text, pos_image_path)]
+
+                if not qry_image_path and self.data_args.rewrites_for_mm_only:
+                    query_description = None
+                if not pos_image_path and self.data_args.rewrites_for_mm_only:
+                    pos_description = None
                 qry_text = self.format_text_for_chat_template(is_query=True, text=qry_text, image_path=qry_image_path, add_generation_prompt=False, description=query_description)
                 pos_text = self.format_text_for_chat_template(is_query=False, text=pos_text, image_path=pos_image_path, add_generation_prompt=False, description=pos_description)
             else:
@@ -313,7 +322,8 @@ class VideoDatasetProcessor(BaseDatasetProcessor):
             query_text, query_image, pos_text, pos_image, neg_text, neg_image, query_description, target_description  = \
                 one_sample['query_text'], one_sample['query_image'], \
                 one_sample['pos_text'], one_sample['pos_image'], \
-                one_sample['neg_text'], one_sample['neg_image']
+                one_sample['neg_text'], one_sample['neg_image'], \
+                one_sample['query_description'], one_sample['target_description']
 
             if self.data_args.apply_chat_template:
 
@@ -331,6 +341,10 @@ class VideoDatasetProcessor(BaseDatasetProcessor):
                     else:
                         pos_image_input = pos_image['paths'][0] or pos_image['bytes'][0]
                 
+                if not query_image and self.data_args.rewrites_for_mm_only:
+                    query_description = None
+                if not pos_image and self.data_args.rewrites_for_mm_only:
+                    target_description = None
                 query_text = self.format_text_for_chat_template(
                     is_query=True, text=query_text, image_path=query_image_input, video_path=query_video_input, 
                     description=query_description)
