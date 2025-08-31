@@ -37,6 +37,21 @@ if not hasattr(modeling_utils, "ALL_PARALLEL_STYLES") or modeling_utils.ALL_PARA
     modeling_utils.ALL_PARALLEL_STYLES = ["tp", "none", "colwise", 'rowwise']
 
 
+def find_subsequence_indices(sequence, subsequence):
+    """
+    Find all start indices where subsequence appears in sequence.
+    """
+    #print (sequence)
+    #print (subsequence)
+    indices = []
+    n, m = len(sequence), len(subsequence)
+    for i in range(n - m + 1):
+        if sequence[i:i+m] == subsequence:
+            return list(range(i, i+m))
+    return list(range(max(-1-m, 0), -1))
+
+
+
 class MMEBModel(nn.Module):
     TRANSFORMER_CLS = AutoModelForCausalLM
 
@@ -105,6 +120,20 @@ class MMEBModel(nn.Module):
         return decoded, hidden_states
 
     def encode_input(self, input, do_sft=False):
+        if "input_ids" in input.keys() and self.pooling_module_type == 'meta_queries':
+            # concat meta queries
+            batch_size, old_input_length = input["input_ids"].shape
+            assert hasattr(self, 'meta_queries'), "meta_queries is not set"
+            meta_query_ids = self.processor.tokenizer.convert_tokens_to_ids(self.meta_queries)
+            suffix = torch.tensor(meta_query_ids, device=input["input_ids"].device)
+            suffix_expanded = suffix.unsqueeze(0).repeat(batch_size, 1)
+            input["input_ids"] = torch.cat([input["input_ids"], suffix_expanded], dim=1)
+
+            mask_expanded = torch.ones(suffix_expanded.shape, device=input["input_ids"].device)
+            input["attention_mask"] = torch.cat([input["attention_mask"], mask_expanded], dim=1)
+            _, new_input_length = input["input_ids"].shape
+            assert new_input_length > old_input_length
+
         if getattr(self, "model_backbone", None) == INTERNVIDEO2:
             if "input_ids" in input.keys():
                 # text side
@@ -210,7 +239,7 @@ class MMEBModel(nn.Module):
             meta_query_ids = self.processor.tokenizer.convert_tokens_to_ids(self.meta_queries)
             meta_query_id_idx = []
             for seq in input['input_ids']:
-                indices = [(seq == meta_query_id).nonzero()[0][0].item() for meta_query_id in meta_query_ids]
+                indices = find_subsequence_indices(seq.tolist(), meta_query_ids)
                 meta_query_id_idx.append(indices)
             
             meta_query_id_idx = torch.tensor(meta_query_id_idx, device=last_hidden_state.device)
@@ -219,10 +248,12 @@ class MMEBModel(nn.Module):
                 last_hidden_state, dim=1, index=meta_query_id_idx.unsqueeze(-1).expand(-1, -1, last_hidden_state.shape[-1]))
             if self.model_config.meta_queries_aggregate_type == 'mean':
                 # mean pooling
-                meta_query_hidden_states = meta_query_hidden_states.mean(dim=1)
+                reps = meta_query_hidden_states.mean(dim=1)
             elif self.model_config.meta_queries_aggregate_type == 'concat':
                 # concat pooling
-                meta_query_hidden_states = meta_query_hidden_states.cat(dim=1)
+                bz = meta_query_hidden_states.shape[0]
+                reps = meta_query_hidden_states.view(bz, -1)
+                #reps = meta_query_hidden_states.cat(dim=1)
             elif self.model_config.meta_queries_aggregate_type == 'late_interaction':
                 # late fusion pooling. no pooling 
                 reps = meta_query_hidden_states
@@ -412,7 +443,6 @@ class MMEBModel(nn.Module):
     def load(cls, model_args: ModelArguments, data_args, is_trainable=True, **kwargs):
         # Loading the base model
         model_name_or_path = model_args.checkpoint_path if model_args.checkpoint_path else model_args.model_name
-        config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
         if not hasattr(model_args, "model_backbone") or not model_args.model_backbone:
             model_backbone = get_backbone_name(hf_config=config, model_type=model_args.model_type)
             setattr(model_args, 'model_backbone', model_backbone)
@@ -496,7 +526,7 @@ class MMEBModel(nn.Module):
 
         base_model.model_backbone = model_args.model_backbone
         pooling_module = None
-        if model_args.pooling_module not in {'last', 'eos'}:
+        if model_args.pooling_module not in {'last', 'eos', 'meta_queries'}:
             print(f'Loading attention pooling module')
             pooler_state_dict = torch.load(os.path.join(model_name_or_path, 'pooling_module', 'pytorch_model.bin'), map_location='cpu')
             pooler_state_dict = {k.replace("pooling_module.", ""):v for k, v in pooler_state_dict.items()}
@@ -633,3 +663,4 @@ class MMEBModel(nn.Module):
             scores = scores.amax(dim=3).sum(dim=2) / q_reps.shape[1] # normalize by n queries
             return scores
         return torch.matmul(q_reps, p_reps.transpose(0, 1))
+
