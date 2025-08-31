@@ -39,7 +39,7 @@ if not hasattr(modeling_utils, "ALL_PARALLEL_STYLES") or modeling_utils.ALL_PARA
 
 def find_subsequence_indices(sequence, subsequence):
     """
-    Find all start indices where subsequence appears in sequence.
+    Find all indices where subsequence appears in sequence.
     """
     #print (sequence)
     #print (subsequence)
