@@ -222,7 +222,7 @@ class MMEBModel(nn.Module):
                 reps = meta_query_hidden_states.mean(dim=1)
             elif self.model_config.meta_queries_aggregate_type == 'concat':
                 # concat pooling
-                reps = meta_query_hidden_states.cat(dim=1)
+                reps = meta_query_hidden_states.view(meta_query_hidden_states.shape[0], -1)
             elif self.model_config.meta_queries_aggregate_type == 'late_interaction':
                 # late fusion pooling. no pooling 
                 reps = meta_query_hidden_states
