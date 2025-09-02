@@ -208,14 +208,14 @@ class BaseEvalDatasetProcessor:
 
         self.query_descriptions = self.target_descriptions = None
         if data_args.query_description_dir is not None and not model_args.do_sft_query:
-            desc_path = os.path.join(data_args.query_description_dir, self.subset_name, "cot", "query.pkl")
+            desc_path = os.path.join(data_args.query_description_dir, self.dataset_name, "cot", "query.pkl")
             if os.path.exists(desc_path):
                 with open(desc_path, "rb") as f:
                     self.query_descriptions = pickle.load(f)
 
 
         if data_args.target_description_dir is not None and not model_args.do_sft_target:
-            desc_path = os.path.join(data_args.target_description_dir, self.subset_name, "cot", "target.pkl")
+            desc_path = os.path.join(data_args.target_description_dir, self.dataset_name, "cot", "target.pkl")
             if os.path.exists(desc_path):
                 with open(desc_path, "rb") as f:
                     self.target_descriptions = pickle.load(f)

@@ -15,24 +15,11 @@ TASK_INST_TGT = "Understand the content of the provided document image."
 DATASET_PARSER_NAME = "visrag"
 @AutoEvalPairDataset.register(DATASET_PARSER_NAME)
 class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
-    def __init__(self,                 
-                 model_args, 
-                 data_args, 
-                 training_args, 
-                 processor, 
-                 **dataset_config):
+    def __init__(self, *args,**dataset_config):
 
-        super().__init__(DATASET_PARSER_NAME, model_args, data_args, training_args, processor, 
+        super().__init__(DATASET_PARSER_NAME, *args,
                          query_key_text='query', query_key_mm=None, cand_key_text="query-id", cand_key_mm="query-id",
                             **dataset_config)
-
-    # def _add_signature_columns_map_func(self, batch_dict):
-    #     signature_columns = {
-    #         "query_key_text": batch_dict['query'],
-    #         "query_key_mm": [''] * len(batch_dict['query']),
-    #         "cand_key_text": [''] * len(batch_dict['query']),
-    #         "cand_key_mm": batch_dict['query_id']}
-    #     return batch_dict | signature_columns
 
     def _load_hf_dataset(self):
         hf_dataset_name = EVAL_DATASET_HF_PATH[self.dataset_config['dataset_name']][0]
@@ -44,11 +31,15 @@ class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         qrels_mapping = load_qrels_mapping(qrels)
         dataset = sample_dataset(dataset, **self.dataset_config)
 
+        if self.data_args.debug_prompt:
+            dataset = dataset.select(range(1))
+            corpus = corpus.select(range(1))
+
         self.dataset_config['model_backbone'] = self.model_args.model_backbone
         self.dataset_config['image_resolution'] = self.data_args.image_resolution
         self.dataset_config['qrels_mapping'] = qrels_mapping
-        corpus = corpus.map(lambda x: corpus_prepare(x, **self.dataset_config), batched=True,
-                            batch_size=1024, num_proc=4,
+        corpus = corpus.map(lambda x: self.corpus_prepare(x, **self.dataset_config), batched=True,
+                            batch_size=1024, #num_proc=4,
                             drop_last_batch = False, load_from_cache_file=False)
         corpus = corpus.select_columns(['cand_text', 'cand_image', 'dataset_infos'])
 
@@ -72,6 +63,9 @@ class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         cand_text, cand_image = [], []
         cand_names, label_names, rel_scores = [], [], []
 
+        query_description = self.query_descriptions[query_id] if self.query_descriptions else None
+        target_description = []
+
         for image_name, rel_score in qrels_mapping[query_id].items():
             base, ext = os.path.splitext(image_name)
             short_base = base[:50] + "_" + hashlib.md5(image_name.encode("utf-8")).hexdigest()[:8]
@@ -79,6 +73,14 @@ class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             image_path = f"{image_root}/{new_imagename}"
             if not os.path.exists(image_path):
                 raise FileNotFoundError(f"Image path {image_path} not found.")
+
+            if self.target_descriptions:
+                target_desc = self.target_descriptions.get((new_imagename, ))
+                if target_desc is None:
+                    print(f"No target description found for image {new_imagename} for corpus dataset for {self.dataset_config['dataset_name']}")
+                target_description.append(target_desc)
+            else:
+                target_description.append(None)
 
             cand_text.append(process_input_text(TASK_INST_TGT, model_backbone, add_image_token=True))
             cand_image.append({
@@ -102,103 +104,49 @@ class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "cand_text": cand_text,       # list[str]
             "cand_image": cand_image,     # list[dict]
             "dataset_infos": dataset_info, 
+            "query_description": query_description,  # str or None
+            "target_description": target_description,  # list[str] or None
         }
 
+    def corpus_prepare(self, batch_dict, *args, **kwargs):
+        image_resolution, model_backbone = kwargs['image_resolution'], kwargs['model_backbone']
+        image_root = kwargs['image_root']
 
-    # @add_metainfo_hook
-    # def batch_preprocess(self, batch_dict, **kwargs):
-    #     image_resolution, model_backbone = kwargs['image_resolution'], kwargs['model_backbone']
-    #     qrels_mapping = kwargs['qrels_mapping']
-    #     image_root = kwargs['image_root']
+        cand_texts, cand_images, dataset_infos = [], [], []
+        for image_name, image in zip(batch_dict['corpus-id'], batch_dict['image']):
+            # some image_name are super long...
+            base, ext = os.path.splitext(image_name)
+            short_base = base[:50] + "_" + hashlib.md5(image_name.encode('utf-8')).hexdigest()[:8] # Truncate base, add original filename hash
+            new_imagename = short_base + ext
+            image_path = f'{image_root}/{new_imagename}'
+            if not os.path.exists(image_path):
+                os.makedirs(image_root, exist_ok=True)
+                image.save(image_path)
 
-    #     query_texts, query_images, cand_texts, cand_images, dataset_infos = [], [], [], [], []
-    #     for query_id, query in zip(batch_dict['query-id'], batch_dict['query']):
-    #         query_texts.append([process_input_text(TASK_INST_QRY, model_backbone, text=query)])
-    #         query_images.append([None])
-    #         cand_text, cand_image, cand_names, label_names = [], [], [], []
-    #         rel_scores = []
+            if self.apply_chat_template:
+                target_description = None
+                if self.target_descriptions:
+                    target_description = self.target_descriptions.get((new_imagename,))
+                    if not target_description:
+                        print(f"Warning: No target description found for image {new_imagename} for corpus dataset for {self.dataset_config['dataset_name']}")
+                cand_texts.append([self.format_text_for_chat_template(
+                    False, 
+                    text=TASK_INST_TGT,
+                    image_path=image_path,
+                    add_generation_prompt=self.model_args.do_sft_target,
+                    description=target_description
+                    )])
+            else:
+                cand_texts.append([process_input_text(TASK_INST_TGT, model_backbone, add_image_token=True)])
 
-    #         for image_name, rel_score in qrels_mapping[query_id].items():
-    #             # some image_name are super long...
-    #             base, ext = os.path.splitext(image_name)
-    #             short_base = base[:50] + "_" + hashlib.md5(image_name.encode('utf-8')).hexdigest()[:8] # Truncate base, add original filename hash
-    #             new_imagename = short_base + ext
-    #             image_path = f'{image_root}/{new_imagename}'
-    #             if not os.path.exists(image_path):
-    #                 raise FileNotFoundError(f'Image path {image_path} not found.')
-    #             cand_text.append(process_input_text(TASK_INST_TGT, model_backbone, add_image_token=True))
-    #             cand_image.append(ImageVideoInstance(
-    #                 bytes=[None],
-    #                 paths=[image_path],
-    #                 resolutions=[RESOLUTION_MAPPING.get(image_resolution, None)],
-    #             ).to_dict())
-    #             cand_names.append(image_name)
-    #             label_names.append(image_name)
-    #             rel_scores.append(rel_score)
-    #         cand_texts.append(cand_text)
-    #         cand_images.append(cand_image)
-    #         dataset_infos.append({
-    #                 "cand_names": cand_names,
-    #                 "label_name": label_names,
-    #                 "rel_scores": rel_scores,
-    #         })
+            cand_images.append([ImageVideoInstance(
+                bytes=[None],
+                paths=[image_path],
+                resolutions=[RESOLUTION_MAPPING.get(image_resolution, None)],
+            ).to_dict()])
+            dataset_infos.append({
+                "cand_names": [image_name],
+            })
 
-    #     processed_batch = {"query_text": query_texts, "query_image": query_images,
-    #             "cand_text": cand_texts, "cand_image": cand_images,
-    #             "dataset_infos": dataset_infos}
-    #     return batch_dict | processed_batch
-
-
-def corpus_prepare(batch_dict, *args, **kwargs):
-    image_resolution, model_backbone = kwargs['image_resolution'], kwargs['model_backbone']
-    image_root = kwargs['image_root']
-
-    cand_texts, cand_images, dataset_infos = [], [], []
-    for image_name, image in zip(batch_dict['corpus-id'], batch_dict['image']):
-        # some image_name are super long...
-        base, ext = os.path.splitext(image_name)
-        short_base = base[:50] + "_" + hashlib.md5(image_name.encode('utf-8')).hexdigest()[:8] # Truncate base, add original filename hash
-        new_imagename = short_base + ext
-        image_path = f'{image_root}/{new_imagename}'
-        if not os.path.exists(image_path):
-            os.makedirs(image_root, exist_ok=True)
-            image.save(image_path)
-        cand_texts.append([process_input_text(TASK_INST_TGT, model_backbone, add_image_token=True)])
-        cand_images.append([ImageVideoInstance(
-            bytes=[None],
-            paths=[image_path],
-            resolutions=[RESOLUTION_MAPPING.get(image_resolution, None)],
-        ).to_dict()])
-        dataset_infos.append({
-            "cand_names": [image_name],
-        })
-
-    return {"cand_text": cand_texts, "cand_image": cand_images,
-            "dataset_infos": dataset_infos}
-
-
-
-# def load_visrag_dataset(model_args, data_args, **kwargs):
-    # hf_dataset_name = EVAL_DATASET_HF_PATH[kwargs['dataset_name']][0]
-    # hf_dataset_split = EVAL_DATASET_HF_PATH[kwargs['dataset_name']][2]
-    # # BEIR format
-    # qrels = load_hf_dataset((hf_dataset_name, "qrels", hf_dataset_split))
-    # corpus = load_hf_dataset((hf_dataset_name, "corpus", hf_dataset_split))
-    # dataset = load_hf_dataset((hf_dataset_name, "queries", hf_dataset_split))
-    # qrels_mapping = load_qrels_mapping(qrels)
-    # dataset = sample_dataset(dataset, **kwargs)
-
-    # kwargs['model_backbone'] = model_args.model_backbone
-    # kwargs['image_resolution'] = data_args.image_resolution
-    # kwargs['qrels_mapping'] = qrels_mapping
-
-    # corpus = corpus.map(lambda x: corpus_prepare(x, **kwargs), batched=True,
-    #                     batch_size=1024, num_proc=4,
-    #                     drop_last_batch = False, load_from_cache_file=False)
-    # corpus = corpus.select_columns(['cand_text', 'cand_image', 'dataset_infos'])
-    # dataset = dataset.map(lambda x: data_prepare(x, **kwargs), batched=True,
-    #                       batch_size=1024, num_proc=4,
-    #                       drop_last_batch = False, load_from_cache_file=False)
-    # dataset = dataset.select_columns(["query_text", "query_image", "cand_text", "cand_image", "dataset_infos"])
-
-    # return dataset, corpus
+        return {"cand_text": cand_texts, "cand_image": cand_images,
+                "dataset_infos": dataset_infos}

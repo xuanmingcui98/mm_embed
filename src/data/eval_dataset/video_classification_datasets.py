@@ -34,7 +34,7 @@ class VideoClassificationEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         dataset_name = self.dataset_config['dataset_name']
         dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[dataset_name])
         corpus = Dataset.from_list([{
-            "cand_text": [label],
+            "cand_text": [self.format_text_for_chat_template(False, text=label)],
             "cand_image": [None],
             "dataset_infos": {"cand_names": [label]}} for label in VIDEOCLS_LABEL_MAPPING[self.dataset_name]])
         return dataset, corpus
