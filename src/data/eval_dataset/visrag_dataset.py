@@ -134,7 +134,7 @@ class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                     text=TASK_INST_TGT,
                     image_path=image_path,
                     add_generation_prompt=self.model_args.do_sft_target,
-                    description=target_description
+                    # description=target_description
                     )])
             else:
                 cand_texts.append([process_input_text(TASK_INST_TGT, model_backbone, add_image_token=True)])
