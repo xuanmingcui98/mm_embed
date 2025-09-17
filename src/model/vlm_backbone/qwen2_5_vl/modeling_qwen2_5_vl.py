@@ -1594,6 +1594,9 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
                 llm_pos_ids_list: list = []
                 st = 0
                 remain_images, remain_videos = image_nums, video_nums
+
+                # @xuanming hack. I guess original processor doesn't append None to image_grid_thw and video_grid_thw
+                image_index = video_index = i
                 for _ in range(image_nums + video_nums):
                     if image_token_id in input_tokens and remain_images > 0:
                         ed_image = input_tokens.index(image_token_id, st)
@@ -1604,22 +1607,35 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
                     else:
                         ed_video = len(input_tokens) + 1
                     if ed_image < ed_video:
-                        t, h, w = (
-                            image_grid_thw[image_index][0],
-                            image_grid_thw[image_index][1],
-                            image_grid_thw[image_index][2],
-                        )
+                        # @xuanming modified
+                        if image_grid_thw[image_index].shape[0] == 1:
+                            cur = image_grid_thw[image_index][0]
+                        else:
+                            cur = image_grid_thw[image_index]
+
+                        # t, h, w = (
+                        #     image_grid_thw[image_index][0],
+                        #     image_grid_thw[image_index][1],
+                        #     image_grid_thw[image_index][2],
+                        # )
+
+                        t, h, w = cur
                         second_per_grid_t = 0
                         image_index += 1
                         remain_images -= 1
                         ed = ed_image
 
                     else:
-                        t, h, w = (
-                            video_grid_thw[video_index][0],
-                            video_grid_thw[video_index][1],
-                            video_grid_thw[video_index][2],
-                        )
+                        if video_grid_thw[video_index].shape[0] == 1:
+                            cur = video_grid_thw[video_index][0]
+                        else:
+                            cur = video_grid_thw[video_index]
+                        # t, h, w = (
+                        #     video_grid_thw[video_index][0],
+                        #     video_grid_thw[video_index][1],
+                        #     video_grid_thw[video_index][2],
+                        # )
+                        t, h, w = cur
                         if second_per_grid_ts is not None:
                             second_per_grid_t = second_per_grid_ts[video_index]
                         else:

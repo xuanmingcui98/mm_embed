@@ -10,11 +10,11 @@ import os
 from datasets import load_dataset
 import re
 import datasets
-from vllm import LLM, SamplingParams
+# from vllm import LLM, SamplingParams
 from PIL import Image
 import hashlib
 import argparse
-from generation_prompts_qwen import prompts, moment_retrieval_query_prompts
+from src.data.prompts import extract_query, extract_target
 from src.data.prompts import (IMAGE_TASKS, 
                               VIDEO_TASKS, 
                               VISDOC_TASKS, 
@@ -53,12 +53,13 @@ def format_qa_with_choices(query, choices):
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate descriptions using a language model.")
     parser.add_argument("--model_name", type=str, required=True, help="Name of the model to use.")
-    parser.add_argument("--dataset_name", type=str, required=True, help="Name of the dataset to use.")
     parser.add_argument("--n_partitions", type=int, default=1, help="Number of partitions for the dataset. Starting from 1.")
     parser.add_argument("--current_partition", type=int, default=1, help="Current partition index.")
-    parser.add_argument("--encode_target", type=str, default=None, help="Encoding query/target.")
     parser.add_argument("--output_folder", type=str, default="descriptions", help="Folder to save descriptions.")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size for generation.")
+    parser.add_argument("--dataset_config", type=str, required=True, help="Name of the dataset to use.")
+    parser.add_argument("--use_gt", action="store_true", help="Whether to include GT in the prompt.")
+
 
     return parser.parse_args()
 
@@ -68,59 +69,42 @@ def main():
 
     print(args)
 
-    llm = LLM(
-        model=args.model_name,
-        trust_remote_code=True,
-        max_model_len=30_000,  
-        limit_mm_per_prompt={"image": 1, "video":1},  
-        tensor_parallel_size=torch.cuda.device_count(),
-        enforce_eager=torch.cuda.device_count()==1
-    )
-    sampling_params = SamplingParams(max_tokens=1024)
+    # llm = LLM(
+    #     model=args.model_name,
+    #     trust_remote_code=True,
+    #     max_model_len=30_000,  
+    #     limit_mm_per_prompt={"image": 1, "video":1},  
+    #     tensor_parallel_size=torch.cuda.device_count(),
+    #     enforce_eager=torch.cuda.device_count()==1
+    # )
+    # sampling_params = SamplingParams(max_tokens=1024)
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name, trust_remote_code=True)
 
 
-    dataset_names = args.dataset_name.split(",")
+    if args.use_gt:
+        from generation_prompts_qwen_with_gt import query_prompt_template, target_prompt_template
+    else:
+        from generation_prompts_qwen import query_prompt_template, target_prompt_template
 
-    print(f"All dataset names: {dataset_names}")
 
-    for dataset_name in dataset_names:
-        dataset_name = dataset_name.strip()
+    with open(args.dataset_config, "r") as f:
+        dataset_configs = yaml.safe_load(f)
 
-        folder = os.path.join("descriptions", dataset_name, "cot")
-        # if os.path.exists(folder):
-        #     print(f"Folder {folder} already exists, skipping...")
-        #     continue
-
-        os.makedirs(folder, exist_ok=True)
+    for _, config in dataset_configs.items():
+        dataset_name = config["dataset_name"]
+        image_dir = config.get("image_dir", config.get("frame_root", None))
 
         print(f"==> Processing dataset: {dataset_name}")
 
-        if dataset_name not in ["MomentSeeker", "Charades-STA", "QVHighlight"]:
-            prompt_template = prompts[dataset_name]
-            prompt_template = prompt_template.replace("<image>", "<|image_pad|>").replace("<video>", "<|video_pad|>")
+        folder = os.path.join(args.output_folder)
+        os.makedirs(folder, exist_ok=True)
 
-        if dataset_name in TRAIN_TASKS:
-            with open("configs/train/train_alltasks.yaml", "r") as f:
-                config = yaml.safe_load(f)
-                if dataset_name in VIDEO_TASKS:
-                    image_dir = config[dataset_name]["video_frame_basedir"]
-                elif dataset_name in VISDOC_TASKS:
-                    image_dir = None
-                else:
-                    image_dir = config[dataset_name]["image_root"]
+        encode_side = config.get("encode_side", "query")
+        if encode_side == 'query':
+            prompt_template = query_prompt_template[dataset_name]
         else:
-            if dataset_name in VISDOC_TASKS:
-                with open("configs/eval/visdoc.yaml", "r") as f:
-                    config = yaml.safe_load(f)
-                    image_dir = config[dataset_name]["image_root"]
-            elif dataset_name in VIDEO_TASKS:
-                with open("configs/eval/video.yaml", "r") as f:
-                    config = yaml.safe_load(f)
-                    image_dir = config[dataset_name]["frame_root"]
-            else:
-                raise ValueError(f"Please provide image_dir for {dataset_name} dataset")
+            prompt_template = target_prompt_template[dataset_name]
 
         if dataset_name in IMAGE_TASKS | VISDOC_TASKS:
             mm_modality = "image"
@@ -128,43 +112,71 @@ def main():
             mm_modality = "video"
 
         query_text_field = target_text_field = mm_field = None
-        if dataset_name == "openbmb/VisRAG-Ret-Train-In-domain-data":
+        if dataset_name in IMAGE_TASKS:
+            dataset = load_dataset("MMEB-eval", dataset_name, split="test")
+
+            query_text_field = "processed_query_text"
+            target_text_field = "processed_target_text"
+
+            mm_field = "qry_img_path"
+            if encode_side == "query":
+                key_fields = ['qry_text', 'qry_img_path']
+            else:
+                key_fields = ['tgt_text', 'qry_img_path']
+
+            image_dir = "/home/xuanmingcui/datasets/MMEB-eval/eval_images/"
+
+            # dataset = load_dataset("MMEB-train", dataset_name, split="original")
+            # query_text_field = "processed_query_text"
+            # target_text_field = "pos_text"
+            # mm_field = "qry_image_path"   
+            # encode_side = "query"
+            # key_fields = ['qry', 'qry_image_path']
+            # image_dir = "/home/xuanmingcui/datasets/MMEB-train"
+
+            def func(row):
+                row['processed_query_text'] = extract_query(row['qry_text'], dataset_name)
+                row['processed_target_text'] = [extract_target(x, dataset_name) for x in row['tgt_text']]
+                return row
+
+            dataset = dataset.map(func, load_from_cache_file=False)
+
+        elif dataset_name == "openbmb/VisRAG-Ret-Train-In-domain-data":
             dataset = load_dataset(dataset_name, split="train")
             key_fields = ['query', 'image', 'source']
             mm_field = "image"
-            args.encode_target = "target"
+
         elif dataset_name == "vidore/colpali_train_set":
             dataset = load_dataset(dataset_name, split="train")
             key_fields = ['query', 'image_filename', 'answer']
             query_text_field = "query"
             target_text_field = "answer"
             mm_field = 'image'
-            args.encode_target = "query"
+
         elif dataset_name == "ActivityNetQA":
-            dataset = load_dataset('json', data_files=config[dataset_name]["data_path"])['train']
+            dataset = load_dataset('json', data_files=config["data_path"])['train']
             key_fields = ['question', 'video_name']
             query_text_field = "question"
             mm_field = 'video_name'
-            args.encode_target = "query"
+
             def func(row):
                 row['question'] = format_qa_with_choices(row['question'], ['yes', 'no'])
                 return row
             dataset = dataset.map(func)
         elif dataset_name == "DiDeMo":
             dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[dataset_name])
-            key_fields = ['video']
-            mm_field = "video"
+            key_fields = ['video_rel']
             def func(row):
                 row['video_filename'] = os.path.splitext(os.path.basename(row['video']))[0]
                 return row
             dataset = dataset.map(func)
-            args.encode_target = "target"
+
         elif dataset_name == "EgoSchema":
             dataset = load_dataset("lmms-lab/egoschema", "Subset", split="test")
             key_fields = ['question', 'video_idx']
             mm_field = 'video_idx'
             query_text_field = "question"
-            args.encode_target = "query"
+
             def func(row):
                 row['question'] = format_qa_with_choices(row['question'], row['option'])
                 return row
@@ -172,30 +184,30 @@ def main():
             dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[dataset_name])
             def func(row):
                 row['video_filename'] = os.path.splitext(os.path.basename(row['video_path']))[0]
-                if args.encode_target == 'query':
+                if encode_side == 'query':
                     row['video_filename'] = os.path.join(row['video_filename'], "query")
                 else:
-                    row['video_filename'] = [os.path.join(row['video_filename'], filename) for filename in os.listdir(os.path.join(image_dir, row['video_filename'])) if filename != "query" and (not os.path.isfile(os.path.join(image_dir, row['video_filename'], filename)))]
+                    row['video_filename'] = [os.path.join(row['video_filename'], filename) for filename in os.listdir(os.path.join(image_dir, row['video_filename'])) if filename != "query"]
                 return row
             dataset = dataset.map(func)
-            if args.encode_target == 'query':
+            if encode_side == 'query':
                 key_fields = ["query", "video_filename"]
                 query_text_field = "query"
                 mm_field = 'video_filename'
-                prompt_template = moment_retrieval_query_prompts[dataset_name]
+
             else:
                 key_fields = ["video_filename"]
                 mm_field = 'video_filename'
                 query_text_field = None
                 target_text_field = None
-                prompt_template = prompts['video_caption_300k']
+
         elif dataset_name == "MomentSeeker":
             dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[dataset_name])
-            if args.encode_target == "query":
+            if encode_side == "query":
                 key_fields = ['query', 'input_frames']
                 mm_field = "input_frames"
                 query_text_field = "query"
-                prompt_template = moment_retrieval_query_prompts[dataset_name]
+
                 def func(row):
                     input_frames = row['input_frames']
                     if isinstance(input_frames, str) and input_frames.endswith(".mp4"):
@@ -205,13 +217,12 @@ def main():
                         row['input_frames'] = "query_" + row['input_frames']
                         row['modality'] = "image"
                     else:
-                        row['modality'] = "text"
+                        row = None # nothing to rewrite 
 
                     return row
             else:
                 key_fields = ["video_filename"]
                 mm_field = 'video_filename'
-                prompt_template = prompts['video_caption_300k']
                 def func(row):
                     raw_frames = row["positive_frames"] + row["negative_frames"]
                     row['video_filename'] = []
@@ -227,9 +238,9 @@ def main():
             dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[dataset_name])
             mm_field = "video_id"
             key_fields = ['video_id']
-            args.encode_target = "target"
         elif dataset_name == "MVBench":
-            args.encode_target = "query"
+
+            prompt_template = """Question: {query}\n\nAnswer with the option\'s letter from the given choices directly and only give the best option."""
 
             from src.data.eval_dataset.mvbench_dataset import subset_meta
             def func(row):
@@ -260,7 +271,7 @@ def main():
             key_fields = ['question', 'subset', 'video']
         
         elif dataset_name == 'NExTQA':
-            args.encode_target = "query"
+
             dataset = load_dataset("lmms-lab/NExTQA", "MC", split="test")
             mm_field = "video"
             key_fields = ['question', 'video']
@@ -286,36 +297,34 @@ def main():
             dataset = dataset.map(func)
         
         elif dataset_name == "SmthSmthV2":
-            args.encode_target = "query"
 
             dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[dataset_name])
             dataset = sample_dataset(dataset, num_sample_per_subset=1000)
             mm_field = "video_id"
             key_fields = ['video_id']
         elif dataset_name == "VATEX":
-            args.encode_target = "target"
+
             dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[dataset_name])
             mm_field = "videoID"
             key_fields = ['videoID']
         elif dataset_name in ["HMDB51", "UCF101", "Kinetics-700", "Breakfast"]:
-            args.encode_target = "query"
+
             dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[dataset_name])
             mm_field = "video_id"
             key_fields = ['video_id']
         elif dataset_name == "Video-MME":
-            args.encode_target = "query"
+
             dataset = load_dataset("lmms-lab/Video-MME", split="test")
             mm_field = "videoID"
             key_fields = ['question', 'videoID']
             query_text_field = "query_text"
 
             def func(row):
-                row['query_text'] = row['question'] + "\n" + "\n".join(row['options'])
+                row['query_text'] = format_qa_with_choices(row['question'], row['options'])
                 return row
             dataset = dataset.map(func)
 
         elif dataset_name in VIDORE_QA_RETRIEVAL_DATASETS:
-            args.encode_target = "target"
             hf_dataset_name = EVAL_DATASET_HF_PATH[dataset_name][0]
             hf_dataset_split = EVAL_DATASET_HF_PATH[dataset_name][2]
             qrels = load_hf_dataset((hf_dataset_name, "qrels", hf_dataset_split))
@@ -344,7 +353,7 @@ def main():
             mm_field = 'image'
         
         elif dataset_name in VISRAG_QA_RETRIEVAL_DATASETS:
-            args.encode_target = "target"
+
             hf_dataset_name = EVAL_DATASET_HF_PATH[dataset_name][0]
             hf_dataset_split = EVAL_DATASET_HF_PATH[dataset_name][2]
             qrels = load_hf_dataset((hf_dataset_name, "qrels", hf_dataset_split))
@@ -383,31 +392,33 @@ def main():
             dataset = load_hf_dataset(EVAL_DATASET_HF_PATH[dataset_name])
             mm_field = 'id'
             key_fields = ['id']
-            args.encode_target = "target"
 
         else:
             raise ValueError(f"Dataset {dataset_name} not supported.")
 
-        if args.encode_target == "target" and isinstance(dataset[0][key_fields[0]], list):
-            paired_dataset = set()
-            for row in dataset:
-                for i in range(len(row[key_fields[0]])):
-                    paired_dataset.add(tuple([row[key_fields[x]][i] for x in range(len(key_fields))]))
-            
-            paired_dataset = sorted(list(paired_dataset))
-            dataset = datasets.Dataset.from_dict({
-                key: [x[i] for x in paired_dataset] for i, key in enumerate(key_fields)
-            })
-
-        # momentseeker has mixed modality on query side.
-        if dataset_name not in ['MomentSeeker'] or args.encode_target == "target":
+        # momentseeker has mixed modality
+        if dataset_name not in ['MomentSeeker']:
             dataset = dataset.add_column("modality", [mm_modality] * len(dataset))
 
-        if args.n_partitions > 1:
-            dataset = dataset.shard(num_shards=args.n_partitions, index=args.current_partition-1)
+        if encode_side == "target" and isinstance(dataset[0][key_fields[0]], list):
+            added = set()
+            paired_dataset = []
+            for row in dataset:
+                for i in range(len(dataset[0][key_fields[0]])):
+                    key = tuple([row[key_fields[x][i]] for x in range(len(key_fields))])
+                    if key not in added:
+                        added.add(key)
+                    to_add = {**row}
+                    for k,v in to_add.items():
+                        if isinstance(v, list):
+                            to_add[k] = v[i]
+                    paired_dataset.append(to_add)
+
+            paired_dataset = sorted(list(paired_dataset))
+            dataset = datasets.Dataset.from_list(paired_dataset)
 
         # load existing descriptions
-        if args.encode_target == "target":
+        if encode_side == "target":
             pkl_files = [x for x in os.listdir(folder) if x.startswith("target") and x.endswith(".pkl")]
         else:
             pkl_files =  [x for x in os.listdir(folder) if x.endswith(".pkl")]
@@ -417,7 +428,7 @@ def main():
             for f in pkl_files:
                 descriptions.update(pickle.load(open(os.path.join(folder, f), "rb")))
 
-        if args.encode_target == "target":
+        if encode_side == "target":
             intermediate_files = [x for x in os.listdir(folder) if x.startswith("target") and x.endswith(".jsonl")]
         else:
             intermediate_files = [x for x in os.listdir(folder) if x.endswith(".jsonl")]
@@ -437,12 +448,18 @@ def main():
                 dataset_unprocessed_idx.append(idx)
         
         dataset = dataset.select(dataset_unprocessed_idx)
+
+
+        if args.n_partitions > 1:
+            dataset = dataset.shard(num_shards=args.n_partitions, index=args.current_partition-1)
+
+        dataset = dataset.select(range(1))
                 
         print(dataset)
 
         print(prompt_template)
 
-        intermediates = open(os.path.join(folder, f"{args.encode_target}_intermediates_{args.current_partition}-{args.n_partitions}_{str(os.environ.get('SLURM_JOB_ID'))}.jsonl"), "a") 
+        intermediates = open(os.path.join(folder, f"{encode_side}_intermediates_{args.current_partition}-{args.n_partitions}_{str(os.environ.get('SLURM_JOB_ID'))}.jsonl"), "a") 
         
         with torch.no_grad():
             for i in tqdm(range(0, len(dataset), args.batch_size)):
@@ -451,7 +468,11 @@ def main():
                 bs = len(next(iter(batch.values())))
                 dummy_inputs = [''] * bs
                 query_text_inputs, target_text_inputs = batch.get(query_text_field, dummy_inputs), batch.get(target_text_field, dummy_inputs)
-                text_inputs = [prompt_template.format(query=query_text, target=target_text) for query_text, target_text in zip(query_text_inputs, target_text_inputs)]
+                if args.use_gt:
+                    target_texts = [x[0] if isinstance(x, list) else x for x in target_text_inputs]
+                    text_inputs = [prompt_template.format(query=text_input, target=target) for text_input, target in zip(text_inputs, target_texts)]
+                else:
+                    text_inputs = [prompt_template.format(query=text_input) for text_input in text_inputs]
                 modalities = batch['modality']
                 raw_mm_inputs = batch.get(mm_field)
                 mm_inputs = []
@@ -502,27 +523,27 @@ def main():
                             {"prompt": tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)}
                         )
                 
-                responses = llm.generate(formatted_inputs, sampling_params=sampling_params,)
+        #         responses = llm.generate(formatted_inputs, sampling_params=sampling_params,)
 
-                keys = [tuple([batch[x][i] for x in key_fields]) for i in range(bs)]
+        #         keys = [tuple([batch[x][i] for x in key_fields]) for i in range(bs)]
 
-                for key, response in zip(keys, responses):
-                    descriptions[key] = response.outputs[0].text
+        #         for key, response in zip(keys, responses):
+        #             descriptions[key] = response.outputs[0].text
 
-                    intermediates.write(json.dumps({"key": key, "response": response.outputs[0].text}) + "\n")
-                    intermediates.flush()
+        #             intermediates.write(json.dumps({"key": key, "response": response.outputs[0].text}) + "\n")
+        #             intermediates.flush()
                 
-        pickle.dump(descriptions, open(os.path.join(folder, f"{args.encode_target}_descriptions_{args.current_partition}-{args.n_partitions}.pkl"), "wb"))
-        intermediates.close()
+        # pickle.dump(descriptions, open(os.path.join(folder, f"{encode_side}_descriptions_{args.current_partition}-{args.n_partitions}.pkl"), "wb"))
+        # intermediates.close()
 
-        if args.current_partition == args.n_partitions:
-            print(f"Finished processing dataset {dataset_name}.")
-            # merge all pickles and intermediate files
-            all_descriptions = {}
-            pkl_files = [x for x in os.listdir(folder) if x.startswith(args.encode_target) and x.endswith(".pkl")]
-            for f in pkl_files:
-                all_descriptions.update(pickle.load(open(os.path.join(folder, f), "rb")))
-            pickle.dump(all_descriptions, open(os.path.join(folder, f"{args.encode_target}.pkl"), "wb"))
+        # if args.current_partition == args.n_partitions:
+        #     print(f"Finished processing dataset {dataset_name}.")
+        #     # merge all pickles and intermediate files
+        #     all_descriptions = {}
+        #     pkl_files = [x for x in os.listdir(folder) if x.startswith(encode_side) and x.endswith(".pkl")]
+        #     for f in pkl_files:
+        #         all_descriptions.update(pickle.load(open(os.path.join(folder, f), "rb")))
+        #     pickle.dump(all_descriptions, open(os.path.join(folder, f"{encode_side}.pkl"), "wb"))
 
 if __name__ == "__main__":
     main()

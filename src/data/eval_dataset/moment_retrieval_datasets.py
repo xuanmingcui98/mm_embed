@@ -9,8 +9,11 @@ from src.model.processor import process_input_text
 from ..prompts import VIDEO_EMBED_INSTRUCTION
 from ..loader.mixed_dataset import AutoPairEvalDataset
 
-TASK_INST_QRY = "" # "Find the clip that corresponds to the described scene in the given video:"
-TASK_INST_TGT = "" # "Understand the content of the provided video."
+TASK_INST_QRY =  "Find the clip that corresponds to the described scene in the given video:"
+TASK_INST_TGT =  "Understand the content of the provided video."
+
+# TASK_INST_QRY = ""
+# TASK_INST_TGT = ""
 
 DATASET_PARSER_NAME = "moment_retrieval"
 @AutoPairEvalDataset.register(DATASET_PARSER_NAME)
@@ -117,8 +120,8 @@ class MomentRetrievalEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                     if self.target_descriptions:
                         target_desc = self.target_descriptions.get((os.path.join(video_name, entry),))
                         target_description.append(target_desc)
-                        if not target_desc:
-                            print(f'No target description found for ({os.path.join(video_name, entry)},) for dataset {DATASET_PARSER_NAME}')
+                        # if not target_desc:
+                        #     print(f'No target description found for ({os.path.join(video_name, entry)},) for dataset {DATASET_PARSER_NAME}')
                     else:
                         target_description.append(None)
 
@@ -142,9 +145,9 @@ class MomentRetrievalEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         query_text = process_input_text(TASK_INST_QRY, model_backbone, text=query_text_raw, add_video_token=True)
         query_description = None
         if self.query_descriptions:
-            query_description = self.query_descriptions.get((query_text_raw, query_frame_dir))
+            query_description = self.query_descriptions.get((query_text_raw, video_name))
             if not query_description:
-                print(f'No query description found for ({query_text_raw}, {query_frame_dir}) for dataset {self.dataset_config["dataset_name"]}')
+                print(f'No query description found for ({query_text_raw}, {video_name}) for dataset {self.dataset_config["dataset_name"]}')
 
         return {
             "query_text": query_text,

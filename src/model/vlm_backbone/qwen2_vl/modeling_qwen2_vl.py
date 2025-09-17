@@ -1028,6 +1028,8 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
 
         # create position embeddings to be shared across the decoder layers
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
+        # @xuanming: a hacky way to pass the position embeddings to the pooler
+        self.current_position_embeddings = position_embeddings
 
         # decoder layers
         all_hidden_states = () if output_hidden_states else None

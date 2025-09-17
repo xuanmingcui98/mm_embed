@@ -451,7 +451,7 @@ class TruncatedSelfPooler(PreTrainedModel):
         hs = hidden_states[self.input_hidden_state_ind]
 
 
-        if "qwen2" == "qwen2":
+        if "qwen2" == "qwen2":  # dummy condition. Currently only support qwen2 vl series
             position_embeddings = self.base_model.model.current_position_embeddings
 
         for layer in self.pooler_layers:

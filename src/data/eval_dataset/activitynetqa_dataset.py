@@ -24,8 +24,12 @@ def process_query(query, prompt, video_token=''):
     return query
 
 
-TASK_INST_QRY = "" # "Given a video and a question, select the most accurate answer from the provided candidates. Return only the exact text of your chosen answer. Question: "
-TASK_INST_TGT = "" # "Represent the following text:\n{query}"
+TASK_INST_QRY = "Given a video and a question, select the most accurate answer from the provided candidates. Return only the exact text of your chosen answer. Question: "
+TASK_INST_TGT = "Represent the following text:\n{query}"
+
+# TASK_INST_QRY = ""
+# TASK_INST_TGT = ""
+
 OPTIONS = ['yes', 'no']
 
 
@@ -37,7 +41,6 @@ DATASET_HF_PATH = "lmms-lab/ActivityNetQA"
      'target': TEXT_EMBED_INSTRUCTION})
 class ActivityNetQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self, *args, **dataset_config):
-
         super().__init__(DATASET_PARSER_NAME, *args, **dataset_config)
 
     def _load_hf_dataset(self):
@@ -51,12 +54,12 @@ class ActivityNetQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         frame_root = kwargs['frame_root']
         num_frames = kwargs['num_frames']
 
-        video_name, query, answer, question_id = \
+        video_name, original_query, answer, question_id = \
             batch_dict['video_name'][idx], batch_dict['question'][idx], \
             batch_dict['answer'][idx], batch_dict['question_id'][idx]
 
-        # query = process_query(query + '? (A) yes; (B) no.', prompt=TASK_INST_QRY, video_token=VLM_VIDEO_TOKENS[model_backbone])
-        query = format_qa_with_choices(query, OPTIONS)
+        query = process_query(original_query + '? (A) yes; (B) no.', prompt=TASK_INST_QRY, video_token=VLM_VIDEO_TOKENS[model_backbone])
+        # query = format_qa_with_choices(query, OPTIONS)
         
         video_path = f'{video_root}/v_{video_name}.mp4'
         frame_dir = f'{frame_root}/v_{video_name}'
@@ -85,9 +88,9 @@ class ActivityNetQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
 
         query_description = None
         if self.query_descriptions:
-            query_description = self.query_descriptions.get((query, video_name), None)
+            query_description = self.query_descriptions.get((original_query, video_name), None)
             if not query_description:
-                print(f'No query description found for ({query}, {video_name}) for dataset {self.dataset_config["dataset_name"]}')
+                print(f'No query description found for ({original_query}, {video_name}) for dataset {self.dataset_config["dataset_name"]}')
         
         qry_frame_paths = process_video_frames(frame_dir, num_frames=num_frames)
         query_images = {"bytes": [None] * len(qry_frame_paths), "paths": qry_frame_paths, "resolutions": [None] * len(qry_frame_paths)}

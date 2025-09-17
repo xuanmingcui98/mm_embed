@@ -140,7 +140,8 @@ class GradCache:
         :param model_input: input to the model call
         :return: model output
         """
-        with autocast() if self.fp16 else nullcontext():
+        # with autocast() if self.fp16 else nullcontext():
+        with self.accelerator.autocast():
             if isinstance(model_input, Tensor):
                 return model(model_input, **kwargs)
             elif isinstance(model_input, list):
@@ -207,13 +208,11 @@ class GradCache:
         :return: A tuple of a) gradient cache for each encoder model, and b) loss tensor
         """
         reps = [r.detach().requires_grad_() if torch.is_floating_point(r) else r for r in reps ]
-        with autocast() if self.fp16 else nullcontext():
+        # with autocast() if self.fp16 else nullcontext():
+        with self.accelerator.autocast():
             loss = self.compute_loss(*reps, **loss_kwargs) * self.training_args.cl_loss_scalar
 
-        if self.fp16:
-            self.scaler.scale(loss).backward()
-        else:
-            loss.backward()
+        self.accelerator.backward(loss)
 
         cache = [r.grad for r in reps]
 
@@ -242,13 +241,13 @@ class GradCache:
             sync_contexts = [nullcontext for _ in range(len(model_inputs))]
 
         for x, state, gradient, sync_context in zip(model_inputs, random_states, cached_gradients, sync_contexts):
-            with sync_context():
+            with sync_context() and self.accelerator.autocast():
                 with state:
                     y = self.model_call(model, x)
                 reps = self.get_reps(y)
 
                 surrogate = torch.dot(reps.flatten(), gradient.flatten())
-                surrogate.backward()
+                self.accelerator.backward(surrogate)
 
     def forward_backward_sft(
             self,
@@ -264,7 +263,7 @@ class GradCache:
 
         total_loss = 0.
         for x, sync_context in zip(model_inputs, sync_contexts):
-            with sync_context():
+            with sync_context() and self.accelerator.autocast():
                 out = self.model_call(model, x, return_loss=True)
                 loss = out[key]
 

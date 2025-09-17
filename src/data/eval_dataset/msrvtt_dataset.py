@@ -8,10 +8,10 @@ from src.model.processor import process_input_text
 from ..prompts import TEXT_EMBED_INSTRUCTION, VIDEO_EMBED_INSTRUCTION
 from ..loader.mixed_dataset import AutoPairEvalDataset
 
-# TASK_INST_QRY = "Find a video that contains the following visual content:"
-# TASK_INST_TGT = "Understand the content of the provided video."
-TASK_INST_QRY = ""
-TASK_INST_TGT = ""
+TASK_INST_QRY = "Find a video that contains the following visual content:"
+TASK_INST_TGT = "Understand the content of the provided video."
+# TASK_INST_QRY = ""
+# TASK_INST_TGT = ""
 
 DATASET_PARSER_NAME = "msrvtt"
 @AutoPairEvalDataset.register(DATASET_PARSER_NAME)

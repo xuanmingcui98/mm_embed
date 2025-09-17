@@ -16,10 +16,10 @@ def process_query(query, prompt, video_token=''):
     return query
 
 
-# TASK_INST_QRY = "Given a video and a question, select the most accurate answer from the provided candidates. Return only the exact text of your chosen answer. Question: "
-# TASK_INST_TGT = "Represent the following text:\n"
-TASK_INST_QRY = ""
-TASK_INST_TGT = ""
+TASK_INST_QRY = "Given a video and a question, select the most accurate answer from the provided candidates. Return only the exact text of your chosen answer. Question: "
+TASK_INST_TGT = "Represent the following text:\n"
+# TASK_INST_QRY = ""
+# TASK_INST_TGT = ""
     
 OPTIONS = ['A', 'B', 'C', 'D']
 
@@ -56,7 +56,12 @@ class VideoMMMEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         domain       = batch_dict["domain"][data_idx]
         sub_category = batch_dict["sub_category"][data_idx]
 
-        query_text = format_qa_with_choices(query, options)
+        # query_text = format_qa_with_choices(query, options)
+        query_text = process_query(
+            query + "\n" + "\n".join(options),
+            prompt=TASK_INST_QRY,
+            video_token=VLM_VIDEO_TOKENS[model_backbone],
+        )
 
         # Paths & frame extraction (if missing)
         video_path = f"{video_root}/{video_id}.mp4"

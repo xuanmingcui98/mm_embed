@@ -5,7 +5,7 @@ from typing import List
 
 @dataclass
 class ModelArguments:
-    model_name: str = field(metadata={"help": "huggingface model name or path"})
+    model_name: str = field(default="Qwen/Qwen2-VL-2B-Instruct", metadata={"help": "huggingface model name or path"})
     model_type: str = field(default=None, metadata={"help": "model type, typically includes in config file, but sometimes needs mannually add"})
     processor_name: str = field(default=None, metadata={"help": "processor_name, huggingface model name or path"})
     model_backbone: str = field(default=None, metadata={"help": "HF model type"})
@@ -74,7 +74,9 @@ class DataArguments:
     debug_prompt: bool = field(default=False, metadata={"help": "debug mode, will not use the dataset_config and will use the dataset_name and subset_name instead"})
     rewrites_for_mm_only: bool = field(default=True, metadata={"help": "only use rewrites for multi-modal input"})
     max_rewrite_len: int = field(default=500, metadata={"help": "maximum rewrite length"})
-
+    num_shards: int = field(default=2, metadata={"help": "number of shards to split the dataset into, useful for debugging with smaller datasets or distributed training"})
+    rebuild_cache: bool = field(default=False, metadata={"help": "rebuild the cache, otherwise will load from existing cache if available"})
+    cache_dataset_dir: str = field(default=None, metadata={"help": "directory to save the processed dataset cache"})
 
 @dataclass
 class TrainingArguments(TrainingArguments):

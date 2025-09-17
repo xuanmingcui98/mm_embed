@@ -11,6 +11,8 @@ from ..loader.mixed_dataset import AutoPairEvalDataset
 
 TASK_INST_QRY = "Find a video that includes the following described scenes:"
 TASK_INST_TGT = "Understand the content of the provided video."
+# TASK_INST_QRY = ""
+# TASK_INST_TGT = ""
 
 DATASET_PARSER_NAME = "didemo"
 @AutoPairEvalDataset.register(DATASET_PARSER_NAME)
@@ -19,7 +21,6 @@ DATASET_PARSER_NAME = "didemo"
      'target': VIDEO_EMBED_INSTRUCTION})
 class DiDemoEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self, *args, **dataset_config):
-
         super().__init__(DATASET_PARSER_NAME, *args, **dataset_config)
 
     def _load_hf_dataset(self):
@@ -48,11 +49,11 @@ class DiDemoEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         cand_text, cand_image = [], []
         dataset_infos = {"cand_names": [video_name], "label_name": video_name}
 
-        query_description = None
-        if self.query_descriptions:
-            query_description = self.query_descriptions.get((video_name,))
-            if not query_description:
-                print(f'No query description found for ({video_name},) for dataset {self.dataset_config["dataset_name"]}')
+        target_description = None
+        if self.target_descriptions:
+            target_description = self.target_descriptions.get((video_rel,))
+            if not target_description:
+                print(f'No target description found for ({video_rel},) for dataset {self.dataset_config["dataset_name"]}')
 
         try:
             # Extract & process frames
@@ -80,6 +81,6 @@ class DiDemoEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             "cand_text": cand_text,         # list[str]
             "cand_image": cand_image,       # list[dict], zipped with cand_text
             "dataset_infos": dataset_infos, # per-sample info
-            "query_description": query_description,
-            "target_description": None,
+            "query_description": None,
+            "target_description": target_description,
         }

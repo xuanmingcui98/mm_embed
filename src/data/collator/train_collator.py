@@ -195,8 +195,8 @@ class MultimodalDataCollator:
             raise RuntimeError(f"Expect batch size {self.batch_size}, but got batch size of {bs}")
             pass
         process_fn = process_vlm_inputs_fns[self.training_args.model_backbone]
-        processed_qry_inputs = process_fn(qry_inputs, processor=self.processor, max_length=self.data_args.max_len)
-        processed_pos_inputs = process_fn(pos_inputs, processor=self.processor, max_length=self.data_args.max_len)
+        processed_qry_inputs = process_fn(qry_inputs, processor=self.processor, max_length=self.data_args.max_len, model_backbone=self.model_args.model_backbone)
+        processed_pos_inputs = process_fn(pos_inputs, processor=self.processor, max_length=self.data_args.max_len, model_backbone=self.model_args.model_backbone)
         processed_qry_inputs['text'] = [e['query_text'] for e in examples]
         processed_pos_inputs['text'] = [e['pos_text'] for e in examples]
         processed_qry_inputs['global_dataset_name'] = [e['global_dataset_name'] for e in examples]
@@ -212,46 +212,3 @@ def get_visual_token_ids(processor):
     else:
         image_tokens = [processor.tokenizer.convert_tokens_to_ids(processor.image_token)]
     return image_tokens
-
-@dataclass
-class MultimodalDataSFTCollator(MultimodalDataCollator):
-    def __call__(self, examples):
-        """
-        :param examples: 'query_text', 'query_image_path', 'pos_text', 'pos_image_path', 'neg_text', 'neg_image_path'
-        """
-        qry_inputs = self._get_batch_inputs(examples, "query_text", "query_image")
-        bs = len(qry_inputs['text'])
-        assert bs > 0, 'An empty batch'
-        # pad batch to batch_size to avoid hanging in distributed training
-        if self.batch_size is not None and bs < self.batch_size:
-            raise RuntimeError(f"Expect batch size {self.batch_size}, but got batch size of {bs}")
-            
-        process_fn = process_vlm_inputs_fns[self.training_args.model_backbone]
-        inputs = process_fn(qry_inputs, processor=self.processor, max_length=self.data_args.max_len)
-        # inputs['text'] = [e['query_text'] for e in examples]
-        inputs['global_dataset_name'] = [e['global_dataset_name'] for e in examples]
-
-        visual_tokens = get_visual_token_ids(self.processor)
-        labels = inputs['input_ids'].clone()
-
-        labels[labels == self.processor.tokenizer.pad_token_id] = -100
-        if inputs['pixel_values'] is not None:
-            for i, pixel_value in enumerate(inputs['pixel_values']):
-                if pixel_value is not None:
-                    # Set visual tokens to -100 in labels
-                    for token_id in visual_tokens:
-                        labels[i][inputs['input_ids'][i] == token_id] = -100
-
-        inputs['labels'] = labels
-
-        sft_inputs = {
-            "input_ids": inputs['input_ids'],
-            "attention_mask": inputs['attention_mask'],
-            "pixel_values": inputs['pixel_values'],
-            "image_grid_thw": inputs['image_grid_thw'],
-            "pixel_values_videos": inputs['pixel_values_videos'],
-            "labels": inputs['labels'],
-            "video_grid_thw": inputs['video_grid_thw'] 
-        }
-        # print_rank(f"\t\tQry collator: processed_qry_inputs['input_ids'].shape={processed_qry_inputs['input_ids'].shape}\t\tPos collator: processed_pos_inputs['input_ids'].shape={processed_pos_inputs['input_ids'].shape}")
-        return sft_inputs

@@ -20,7 +20,7 @@ def process_query(query, prompt, video_token=''):
     return query
 
 
-TASK_PROMPT = "" # "Given a video and a question, select the most accurate answer from the provided candidates. Return only the exact text of your chosen answer. Question: "
+TASK_PROMPT =  "Given a video and a question, select the most accurate answer from the provided candidates. Return only the exact text of your chosen answer. Question: "
 OPTIONS = ['A', 'B', 'C', 'D']
 
 DATASET_PARSER_NAME = "egoschema"
@@ -52,7 +52,12 @@ class EgoSchemaEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         question_idx = batch_dict["question_idx"][data_idx]
         options      = batch_dict["option"][data_idx]
 
-        query = format_qa_with_choices(question, options)
+        # query = format_qa_with_choices(question, options)
+        query = process_query(
+            question + " " + " ".join(options),
+            prompt=TASK_PROMPT,
+            video_token=VLM_VIDEO_TOKENS[model_backbone],
+        )
 
         # Paths
         video_path = f"{video_root}/{video_idx}.mp4"

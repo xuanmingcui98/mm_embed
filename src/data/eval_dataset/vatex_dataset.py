@@ -8,10 +8,10 @@ from src.model.processor import process_input_text
 from ..prompts import TEXT_EMBED_INSTRUCTION, VIDEO_EMBED_INSTRUCTION
 from ..loader.mixed_dataset import AutoPairEvalDataset
 
-# TASK_INST_QRY = "Select a video that fits the description provided:"
-# TASK_INST_TGT = "Understand the content of the provided video."
-TASK_INST_QRY = ""
-TASK_INST_TGT = ""
+TASK_INST_QRY = "Select a video that fits the description provided:"
+TASK_INST_TGT = "Understand the content of the provided video."
+# TASK_INST_QRY = ""
+# TASK_INST_TGT = ""
 
 DATASET_PARSER_NAME = "vatex"
 # 4,478 example since a lot of videos are not valid

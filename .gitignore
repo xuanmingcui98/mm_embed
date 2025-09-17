@@ -66,3 +66,39 @@ test.ipynb
 # *_orig.py
 *.json
 scripts/*
+
+activity.parquet
+additional_ds.md
+analysis.ipynb
+cache_dir/
+cookies.txt
+debug/
+debug_gen/
+debug_gen_no_cot/
+debug_vllm/
+debuggg/
+description_nocot_vllm/
+didemo.parquet
+ego.parquet
+eval_gen.sh
+eval_generated_test/
+eval_generated_test_nocot/
+eval_generation_retrieval_train.py
+generation_prompts_qwen_with_gt.py
+get_result_summary.py
+inference_generation_hf.py
+# inference_generation_hf_ddp.py
+inference_results/
+inference_results2/
+inference_results_newhf/
+inference_results_newhf_flashattn/
+inference_results_old/
+inference_results_v2/
+merge_lora.py
+nextqa.parquet
+orig_output_005.mp4
+output_005.mp4
+prompts_with_gt.py
+# src/data/generation_utils.py
+test.png
+youcook2.parquet

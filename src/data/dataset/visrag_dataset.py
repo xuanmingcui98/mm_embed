@@ -2,8 +2,8 @@ from datasets import load_dataset
 from PIL import Image
 from datasets.features.image import image_to_bytes
 from torch.jit import isinstance
-from ..dataset.base_pair_dataset import RESOLUTION_MAPPING, VideoDatasetProcessor
-from ..loader.mixed_dataset import AutoPairDataset
+from ..dataset.base_pair_dataset import RESOLUTION_MAPPING, VideoDatasetProcessor, VideoSFTDatasetProcessor
+from ..loader.mixed_dataset import AutoPairDataset, AutoSFTDataset
 from src.model.processor import VLM_IMAGE_TOKENS
 from ..prompts import TEXT_EMBED_INSTRUCTION, VIDEO_EMBED_INSTRUCTION, VISDOC_QA_RETRIEVAL_INSTRUCTION, VISDOC_EMBED_INSTRUCTION
 
@@ -67,10 +67,10 @@ class VisragDatasetProcessor(VideoDatasetProcessor):
         image_resolution = kwargs['image_resolution']
 
         query, image, source = batch_dict['query'][idx], batch_dict['image'][idx], batch_dict['source'][idx]
-        # query = process_query(query, prompt=query_source2prompt.get(source, ""), image_token="")
-        # pos_text = process_query('', prompt=target_source2prompt.get(source, ""), image_token=VLM_IMAGE_TOKENS[model_backbone])
-        query = process_query(query, prompt="", image_token="")
-        pos_text = process_query('', prompt="", image_token=VLM_IMAGE_TOKENS[model_backbone])
+        query = process_query(query, prompt=query_source2prompt.get(source, ""), image_token="")
+        pos_text = process_query('', prompt=target_source2prompt.get(source, ""), image_token=VLM_IMAGE_TOKENS[model_backbone])
+        # query = process_query(query, prompt="", image_token="")
+        # pos_text = process_query('', prompt="", image_token=VLM_IMAGE_TOKENS[model_backbone])
 
         if isinstance(image, Image.Image):
             # BC, datasets==2.21.0
@@ -86,8 +86,8 @@ class VisragDatasetProcessor(VideoDatasetProcessor):
         target_description = None
         if self.target_descriptions:
             target_description = self.target_descriptions.get((batch_dict['id'][idx],))
-            if target_description is None:
-                print(f"No target description found for id {batch_dict['id'][idx]} for {self.dataset_config['dataset_name']} dataset")
+            # if target_description is None:
+                # print(f"No target description found for id {batch_dict['id'][idx]} for {self.dataset_config['dataset_name']} dataset")
                 
         return {"query_text": query, 
                 "query_image": None,
@@ -97,3 +97,40 @@ class VisragDatasetProcessor(VideoDatasetProcessor):
                 "neg_image": None,
                 "query_description": None,
                 "target_description": target_description}
+
+
+@AutoSFTDataset.register(DATASET_PARSER_NAME)
+class VisragSFTDatasetProcessor(VideoSFTDatasetProcessor):
+    def __init__(self, *args, **dataset_config):
+        super().__init__(DATASET_PARSER_NAME, *args, **dataset_config)
+
+    def _load_hf_dataset(self):
+        dataset_name = self.dataset_config.get("dataset_name", DATASET_PARSER_NAME)
+        dataset_split = self.dataset_config.get("dataset_split", "train")
+        dataset_path = self.dataset_config.get("dataset_path", None)
+
+        if dataset_name:
+            dataset = load_dataset("openbmb/VisRAG-Ret-Train-In-domain-data", split=dataset_split)
+        elif dataset_path:
+            dataset = load_dataset("parquet", data_files=dataset_path, split="train")
+        dataset = dataset.add_column("id", list(range(len(dataset))))
+        return dataset
+
+    def _process_one_sample(self, idx, batch_dict, *args, **kwargs):
+
+        query, image, source = batch_dict['query'][idx], batch_dict['image'][idx], batch_dict['source'][idx]
+
+        if isinstance(image, Image.Image):
+            # BC, datasets==2.21.0
+            image_bytes = image_to_bytes(image)
+            path = ""
+        elif type(image) is dict:
+            # datasets==3.3.2
+            image_bytes = image['bytes']
+            path = image['path']
+        
+        answer = self.target_descriptions.get((batch_dict['id'][idx],))
+
+        return {"prompt": "", 
+                "image": {"bytes": [image_bytes], "paths": [path]}, 
+                "answer": answer}

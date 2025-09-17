@@ -2,7 +2,7 @@ import sys
 
 from datasets import load_dataset
 from src.utils import print_rank
-
+import random
 
 def sample_dataset(dataset, **kwargs):
     dataset_name = kwargs.get("dataset_name", "UNKNOWN-DATASET")
@@ -11,7 +11,8 @@ def sample_dataset(dataset, **kwargs):
     if num_sample_per_subset is not None and type(num_sample_per_subset) is str and num_sample_per_subset.isdigit():
         num_sample_per_subset = int(num_sample_per_subset)
     if type(num_sample_per_subset) is int and num_sample_per_subset < dataset.num_rows:
-        dataset = dataset.select(range(num_sample_per_subset))
+        random_idx = random.sample(range(dataset.num_rows), num_sample_per_subset)
+        dataset = dataset.select(random_idx)
         print_rank(f"Subsample {dataset_name} to {len(dataset)} samples")
 
     return dataset

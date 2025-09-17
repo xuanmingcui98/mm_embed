@@ -15,5 +15,4 @@ DATASET_PARSER_NAME = "image_i2i_vg"
     'target': TEXT_EMBED_INSTRUCTION })
 class ImageI2IVGEvalDatasetProcessor(MMEBEvalDatasetProcessor):
     def __init__(self, *args, **dataset_config):
-
         super().__init__(DATASET_PARSER_NAME, *args, **dataset_config)

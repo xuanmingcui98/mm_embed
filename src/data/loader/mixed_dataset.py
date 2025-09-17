@@ -2,7 +2,8 @@ from abc import ABCMeta
 from collections import defaultdict
 from typing import Union, List, Dict, Any
 from functools import wraps
-
+import yaml, os
+from datasets import load_from_disk
 from datasets.distributed import split_dataset_by_node
 from datasets import concatenate_datasets
 from ..dataset.hf_datasets import interleave_datasets
@@ -66,6 +67,40 @@ class AutoPairDataset(metaclass=ABCMeta):
                     print(f"[Alert] AutoPairEvalDataset: a instruction in the same name ({name}) has been registered")
                 else:
                     cls.instruction_registry[name] = instruction
+            return wrapped_class
+        return inner_wrapper
+
+class AutoSFTDataset(metaclass=ABCMeta):
+    # Base class for auto datasets.
+    registry = {}
+
+    def __init_subclass__(cls):
+        if cls.__name__ not in AutoSFTDataset.registry:
+            AutoSFTDataset.registry[cls.__name__] = cls
+        else:
+            raise RuntimeError('Subclass "{cls.__name__}" has already defined.')
+
+    def __init__(self, *args, **kwargs):
+        raise EnvironmentError(
+            f"{self.__class__.__name__} is designed to be instantiated "
+            f"using the `{self.__class__.__name__}.from_pretrained(pretrained_model_name_or_path)` or "
+            f"`{self.__class__.__name__}.from_config(config)` methods."
+        )
+
+    @classmethod
+    def instantiate(cls, dataset_parser, *args, **kwargs):
+        try:
+            return cls.registry[dataset_parser](*args, **kwargs).load()
+        except Exception as e:
+            raise e
+
+    @classmethod
+    def register(cls, dataset_name):
+        def inner_wrapper(wrapped_class):
+            if dataset_name in cls.registry:
+                print(f"[Alert] AutoSFTDataset: a class in the same name ({dataset_name}) has been registered")
+            else:
+                cls.registry[dataset_name] = wrapped_class
             return wrapped_class
         return inner_wrapper
     
@@ -148,17 +183,29 @@ def init_sft_dataset(dataset_config, model_args, data_args, training_args, proce
     We don't use interleave datasets/weighted datasets for SFT.
     """
 
+    with open(data_args.dataset_config, 'r') as yaml_file:
+        dataset_config = yaml.safe_load(yaml_file)
+
     train_datasets = []
     for data_idx, (global_dataset_name, dataset_config) in enumerate(dataset_config.items()):
-        train_dataset = AutoPairEvalDataset.instantiate(model_args=model_args, data_args=data_args, training_args=training_args, processor=processor, **dataset_config)
+        cached_dataset_path = os.path.join(data_args.cache_dataset_dir, dataset_config.get("subset_name", dataset_config.get("dataset_name")))
+        if os.path.exists(cached_dataset_path) and (not data_args.rebuild_cache):
+            print_master(f"Found cached dataset for {global_dataset_name} at {os.path.join(data_args.cache_dataset_dir, dataset_config.get('subset_name', dataset_config.get('dataset_name')))}, loading it ...")
+            train_dataset = load_from_disk(cached_dataset_path)
+        else:
+            train_dataset = AutoSFTDataset.instantiate(model_args=model_args, data_args=data_args, training_args=training_args, processor=processor, **dataset_config)
+            if data_args.cache_dataset_dir:
+                train_dataset.save_to_disk(cached_dataset_path)
+
+        num_sample_per_subset = dataset_config.get("num_sample_per_subset")
+        if train_dataset.num_rows >= num_sample_per_subset:
+            train_dataset = train_dataset.shuffle(seed=training_args.seed).select(range(num_sample_per_subset))
         print_master(f"\t\tDataset#{data_idx} (dataset_parser={dataset_config.get('dataset_parser', 'n/a')}): {global_dataset_name}, num_rows={train_dataset.num_rows}")
         train_datasets.append(train_dataset)
 
-    total_num_rows = sum([d.num_rows for d in train_datasets])
     from datasets import concatenate_datasets
     train_datasets = concatenate_datasets(train_datasets)
-    setattr(train_datasets, "num_rows", total_num_rows)
+    train_datasets = train_datasets.shuffle(seed=training_args.seed)
     return train_datasets
-
 
 

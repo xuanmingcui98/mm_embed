@@ -9,10 +9,10 @@ from ..loader.mixed_dataset import AutoPairEvalDataset
 from ..prompts import VISDOC_QA_RETRIEVAL_INSTRUCTION, VISDOC_EMBED_INSTRUCTION
 
 
-# TASK_INST_QRY = "Find a document image that matches the given query:"
-# TASK_INST_TGT = "Understand the content of the provided document image."
-TASK_INST_QRY = ""
-TASK_INST_TGT = ""
+TASK_INST_QRY = "Find a document image that matches the given query:"
+TASK_INST_TGT = "Understand the content of the provided document image."
+# TASK_INST_QRY = ""
+# TASK_INST_TGT = ""
 
 
 VISRAG_DATASETS = [

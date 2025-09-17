@@ -18,7 +18,8 @@ TASK_INST_TGT = ""
 DATASET_PARSER_NAME = "ssv2"
 @AutoPairEvalDataset.register(DATASET_PARSER_NAME)
 @AutoPairEvalDataset.register_instruction("SmthSmthV2",
-    {'query': """Given the video, identify the actions or object interactions being performed by the person. Embed the video with your answer.""",
+    # {'query': """Given the video, identify the actions or object interactions being performed by the person. Embed the video with your answer.""",
+    {'query': """Given the video, identify the actions or object interactions being performed by the person.""",
     'target': TEXT_EMBED_INSTRUCTION})
 class SSV2EvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self, *args,**dataset_config):
@@ -65,7 +66,6 @@ class SSV2EvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         # Candidates: text only (negatives), no images
         cand_text  = list(cand_list) if isinstance(cand_list, (list, tuple)) else [cand_list]
         cand_image = [None] * len(cand_text)
-
 
         query_description = None
         if self.query_descriptions:

@@ -9,11 +9,10 @@ from ..loader.mixed_dataset import AutoPairEvalDataset
 from ..prompts import VIDEO_EMBED_INSTRUCTION, TEXT_EMBED_INSTRUCTION
 
 
-# TASK_INST_QRY = "Find a video that demonstrates the following action while making a recipe:"
-# TASK_INST_TGT = "Understand the content of the provided video."
-
-TASK_INST_QRY = ""
-TASK_INST_TGT = ""
+TASK_INST_QRY = "Find a video that demonstrates the following action while making a recipe:"
+TASK_INST_TGT = "Understand the content of the provided video."
+# TASK_INST_QRY = ""
+# TASK_INST_TGT = ""
 
 DATASET_PARSER_NAME = "youcook2"
 # slightly less than the official one: https://github.com/antoine77340/MIL-NCE_HowTo100M/blob/master/csv/validation_youcook.csv?plain=1
@@ -70,8 +69,8 @@ class YouCook2EvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
 
         target_description = None
         if self.target_descriptions:
-            target_description = self.target_descriptions.get(video_name)
-            if target_description is not None:
+            target_description = self.target_descriptions.get((video_name,))
+            if target_description is None:
                 print(f"Missing target description for video {video_name} for {self.dataset_config['dataset_name']} dataset")
 
         return {

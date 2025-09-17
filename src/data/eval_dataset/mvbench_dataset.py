@@ -98,10 +98,10 @@ def read_frame(transform, video_path, bound=None, fps=3):
 
 
 decord_method_map = {'video': read_video, 'gif': read_gif, 'frame': read_frame}
-# TASK_INST_QRY = "Given a video and a question, select the most accurate answer from the provided candidates. Return only the exact text of your chosen answer. Question: "
-# TASK_INST_TGT = "Represent the following text:\n"
-TASK_INST_QRY = ""
-TASK_INST_TGT = ""
+TASK_INST_QRY = "Given a video and a question, select the most accurate answer from the provided candidates. Return only the exact text of your chosen answer. Question: "
+TASK_INST_TGT = "Represent the following text:\n"
+# TASK_INST_QRY = ""
+# TASK_INST_TGT = ""
 
 DATASET_PARSER_NAME = "mvbench"
 DATASET_HF_PATH = "OpenGVLab/MVBench"
@@ -138,8 +138,15 @@ class MVBenchEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         cands_raw      = batch_dict["candidates"][data_idx]
         answer_raw     = batch_dict["answer"][data_idx]
 
-        _, cand_text, answer, answer_idx = qa_template(query_raw, cands_raw, answer_raw)
-        query_text = format_qa_with_choices(query_raw, cand_text)
+
+        q_with_token = process_query(
+            query_raw,
+            prompt=TASK_INST_QRY,
+            video_token=VLM_VIDEO_TOKENS[model_backbone],
+        )
+        query_text, cand_text, answer, answer_idx = qa_template(q_with_token, cands_raw, answer_raw)
+        # _, cand_text, answer, answer_idx = qa_template(query_raw, cands_raw, answer_raw)
+        # query_text = format_qa_with_choices(query_raw, cand_text)
 
         # Resolve paths & materialize frames if needed
         subset_info = subset_meta[subset]
@@ -185,7 +192,7 @@ class MVBenchEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
 
         query_description = None
         if self.query_descriptions:
-            query_description = self.query_descriptions.get((query_raw, video_filename))
+            query_description = self.query_descriptions.get((query_raw, subset, video_filename))
             if not query_description:
                 print(f'No query description found for ({query_raw}, {video_filename}) for dataset {self.dataset_config["dataset_name"]}')
 

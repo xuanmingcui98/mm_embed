@@ -16,10 +16,10 @@ def process_query(query, prompt, video_token=''):
     return query
 
 
-# TASK_INST_QRY = "Given a video and a question, select the most accurate answer from the provided candidates. Return only the exact text of your chosen answer. Question: "
-# TASK_INST_TGT = "Represent the following text:\n"
-TASK_INST_QRY = ""
-TASK_INST_TGT = ""
+TASK_INST_QRY = "Given a video and a question, select the most accurate answer from the provided candidates. Return only the exact text of your chosen answer. Question: "
+TASK_INST_TGT = "Represent the following text:\n"
+# TASK_INST_QRY = ""
+# TASK_INST_TGT = ""
 
 OPTIONS = ['A', 'B', 'C', 'D']
 
@@ -62,8 +62,15 @@ class NextQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
 
         options = [a0, a1, a2, a3, a4]
 
-        _, cand_text, _, answer_idx = qa_template(query, options, answer)
-        query_text = format_qa_with_choices(query, cand_text)
+        q_with_token = process_query(
+            query,
+            prompt=TASK_INST_QRY,
+            video_token=VLM_VIDEO_TOKENS[model_backbone],
+        )
+        query_text, cand_text, _, answer_idx = qa_template(q_with_token, options, answer)
+
+        # _, cand_text, _, answer_idx = qa_template(query, options, answer)
+        # query_text = format_qa_with_choices(query, cand_text)
 
         # Paths and frame extraction (if missing)
         video_path = f"{video_root}/{video_id}.mp4"

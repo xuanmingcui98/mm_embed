@@ -110,12 +110,11 @@ class MMEBTrainer(Trainer):
         os.makedirs(output_dir, exist_ok=True)
 
         if state_dict is None:
-            state_dict = self.model.state_dict()
-        prefix = 'encoder.'
-        assert all(k.startswith(prefix) for k in state_dict.keys()), list(state_dict.keys())
-        state_dict = {k[len(prefix):]: v for k, v in state_dict.items()}
+            encoder_state_dict = self.model.encoder.state_dict()
+
+        encoder_state_dict = {k.replace("encoder.", "") : v for k, v in encoder_state_dict.items()}
         self.model.encoder.save_pretrained(
-            output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors
+            output_dir, state_dict=encoder_state_dict, safe_serialization=self.args.save_safetensors
         )
 
         if self.tokenizer is not None:
@@ -169,7 +168,7 @@ class MMEBTrainer(Trainer):
     def _load_from_checkpoint(self, resume_from_checkpoint, model=None):
         self.model_args.checkpoint_path = resume_from_checkpoint
         print_master(f"Loading checkpoint from {resume_from_checkpoint}")
-        self.model = MMEBModel.load(self.model_args, self.data_args)
+        self.model, _ = MMEBModel.load(self.model_args, self.data_args)
         self.model_wrapped = self.model
 
     def _inner_training_loop(
@@ -443,7 +442,7 @@ class MMEBTrainer(Trainer):
                     step += 1
                     total_batched_samples += 1
 
-                    dataset_stat = collections.Counter(inputs[0]['global_dataset_name'])
+                    # dataset_stat = collections.Counter(inputs[0]['global_dataset_name'])
                     # print_rank(f"dataset name: {str(set(inputs[0]['global_dataset_name']))}")
                     # for dname, count in sorted(dataset_stat.items(), key=lambda t:t[1], reverse=True):
                     #     print_rank(f"\t\tdataset_name={dname}, count={count}")

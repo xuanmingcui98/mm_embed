@@ -217,10 +217,10 @@ class MMEBModel(nn.Module):
                 last_hidden_state, dim=1, index=meta_query_id_idx.unsqueeze(-1).expand(-1, -1, last_hidden_state.shape[-1]))
             if self.model_config.meta_queries_aggregate_type == 'mean':
                 # mean pooling
-                meta_query_hidden_states = meta_query_hidden_states.mean(dim=1)
+                reps = meta_query_hidden_states.mean(dim=1)
             elif self.model_config.meta_queries_aggregate_type == 'concat':
                 # concat pooling
-                meta_query_hidden_states = meta_query_hidden_states.cat(dim=1)
+                reps = meta_query_hidden_states.cat(dim=1)
             elif self.model_config.meta_queries_aggregate_type == 'late_interaction':
                 # late fusion pooling. no pooling 
                 reps = meta_query_hidden_states
@@ -505,7 +505,7 @@ class MMEBModel(nn.Module):
 
         base_model.model_backbone = model_args.model_backbone
         pooling_module = None
-        if model_args.pooling_module not in {'last', 'eos'}:
+        if model_args.pooling_module not in {'last', 'eos', 'meta_queries'}:
             print(f'Loading attention pooling module')
             pooler_state_dict = torch.load(os.path.join(model_name_or_path, 'pooling_module', 'pytorch_model.bin'), map_location='cpu')
             pooler_state_dict = {k.replace("pooling_module.", ""):v for k, v in pooler_state_dict.items()}

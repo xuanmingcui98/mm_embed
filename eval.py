@@ -28,8 +28,6 @@ from src.eval_utils.metrics import RankingMetrics
 from src.model.model import MMEBModel
 from src.model.processor import get_backbone_name, load_processor, COLPALI
 from src.utils import batch_to_device, print_rank, print_master
-import multiprocessing
-from multiprocessing import Pool, cpu_count
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s [%(name)s:%(lineno)s] %(message)s')
 logger = logging.getLogger(__name__)
 logging.getLogger("PIL").setLevel(logging.WARNING)
@@ -147,6 +145,9 @@ def parse_eval_args():
     parser.add_argument("--checkpoint_path", type=str, required=True, help="Path to the model checkpoint")
     parser.add_argument("--per_device_eval_batch_size", type=int, default=32, help="Batch size for evaluation")
     parser.add_argument("--dataset_config", type=str, default="configs/eval/image.yaml", help="Path to the dataset configuration file")
+    parser.add_argument("--output_dir", type=str, default="eval", help="Directory to save evaluation results")
+    parser.add_argument("--query_description_dir", type=str, default=None, help="Directory containing dataset descriptions")
+    parser.add_argument("--target_description_dir", type=str, default=None, help="Directory containing dataset descriptions")
 
     return parser.parse_args()
 
@@ -174,6 +175,8 @@ def main():
             sys.argv.append(rank)
 
     eval_args = parse_eval_args()
+
+    eval_args.target_description_dir = eval_args.query_description_dir if eval_args.target_description_dir is None else eval_args.target_description_dir
     parser = HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
 
     args = {}
@@ -216,7 +219,7 @@ def main():
     with open(data_args.dataset_config, 'r') as yaml_file:
         dataset_configs = yaml.safe_load(yaml_file)
 
-    encode_output_path = os.path.join(model_args.checkpoint_path, "eval_ours")
+    encode_output_path = os.path.join(model_args.checkpoint_path, eval_args.output_dir)
     os.makedirs(encode_output_path, exist_ok=True)
     # --- Main Evaluation Loop ---
     for dataset_idx, (dataset_name, task_config) in enumerate(dataset_configs.items()):
