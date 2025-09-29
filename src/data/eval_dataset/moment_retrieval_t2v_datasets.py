@@ -15,13 +15,13 @@ TASK_INST_TGT =  "Understand the content of the provided video."
 # TASK_INST_QRY = ""
 # TASK_INST_TGT = ""
 
-DATASET_PARSER_NAME = "moment_retrieval"
+DATASET_PARSER_NAME = "moment_retrieval_t2v"
 @AutoPairEvalDataset.register(DATASET_PARSER_NAME)
 @AutoPairEvalDataset.register_instruction(["QVHighlight", "Charades-STA"],
     {'query': """Given a video and a query, identify the clip in the video that best matches the query.\n\nQuery: {text}\n\nEmbed the clip with your answer.""",
      'target': VIDEO_EMBED_INSTRUCTION})
 
-class MomentRetrievalEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
+class MomentRetrievalT2VEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self, *args, **dataset_config):
 
         super().__init__(DATASET_PARSER_NAME, *args, **dataset_config)
@@ -65,38 +65,6 @@ class MomentRetrievalEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         pos_clip_name   = None
 
         try:
-            # Save and load query frames (only extract if not already there)
-            if not os.path.exists(query_frame_dir):
-                save_frames(
-                    video_path=query_video_path,
-                    frame_dir=query_frame_dir,
-                    max_frames_saved=max_video_frames_saved
-                )
-            qry_frame_paths = process_video_frames(query_frame_dir, num_frames=num_video_frames)
-
-            if qry_frame_paths:
-                query_image = {
-                    "bytes": [None] * len(qry_frame_paths),
-                    "paths": qry_frame_paths,
-                    "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)] * len(qry_frame_paths),
-                }
-
-            # If frames for candidates are not yet extracted, do so from raw clip videos
-            if not os.path.exists(frames_dir):
-                clip_video_dir = os.path.join(clip_root, video_name) if clip_root else None
-                if clip_video_dir and os.path.isdir(clip_video_dir):
-                    clip_video_paths = [
-                        f for f in os.listdir(clip_video_dir)
-                        if os.path.splitext(f)[1].lower() in VID_EXTENSIONS
-                    ]
-                    for clip_video_file in clip_video_paths:
-                        clip_name = os.path.splitext(clip_video_file)[0]
-                        clip_frame_dir = os.path.join(frames_dir, clip_name)
-                        save_frames(
-                            video_path=os.path.join(clip_video_dir, clip_video_file),
-                            frame_dir=clip_frame_dir,
-                            max_frames_saved=max_clip_frames_saved
-                        )
 
             target_description = []
             # Collect candidate clips from frames_dir

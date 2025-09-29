@@ -20,7 +20,8 @@ from .vatex_dataset import VatexEvalDatasetProcessor
 # from .gui_dataset import GuiEvalDatasetProcessor
 
 # Temporal Grounding
-from .moment_retrieval_datasets import MomentRetrievalEvalDatasetProcessor
+from .moment_retrieval_datasets import MomentRetrievalEvalDatasetProcessor 
+from .moment_retrieval_t2v_datasets import MomentRetrievalT2VEvalDatasetProcessor
 from .momentseeker_dataset import MomentSeekerEvalDatasetProcessor
 
 # MMEB

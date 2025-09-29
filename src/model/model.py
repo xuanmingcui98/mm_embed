@@ -23,6 +23,7 @@ from src.model.baseline_backbone.phi3_v.modeling_phi3_v import Phi3VForCausalLM
 from src.model.baseline_backbone.llava_next import LlavaNextForConditionalGeneration
 from src.model.processor import load_processor, get_visual_token_ids
 from contextlib import nullcontext
+from src.loss import SimpleContrastiveLoss, DistributedContrastiveLoss
 
 from .pooler import (AttentionPooler, AttentionPoolingConfig, 
                      NVEmbedPooler, NVEmbedPoolingConfig,
@@ -50,10 +51,20 @@ class MMEBModel(nn.Module):
         self.encoder = encoder
         self.pooling_module_type = model_config.pooling_module
         self.normalize = model_config.normalize
-        self.temperature = model_config.temperature
+        self.temperature = torch.tensor(model_config.temperature)
+        self.inter_task_temperature = torch.tensor(model_config.inter_task_temperature) if model_config.inter_task_temperature else None
         self.processor = processor
         self.cross_entropy = nn.CrossEntropyLoss(reduction='mean')
         self.is_ddp = dist.is_initialized()
+
+        if self.model_config.learnable_temperature:
+            self.temperature = nn.Parameter(torch.tensor(self.temperature))
+            if model_config.inter_task_temperature is not None:
+                self.inter_task_temperature = nn.Parameter(torch.tensor(model_config.inter_task_temperature))
+            else:
+                self.inter_task_temperature = None
+
+        self.loss_fn = DistributedContrastiveLoss() if self.is_ddp else SimpleContrastiveLoss()
         if self.is_ddp:
             self.process_rank = dist.get_rank()
             self.world_size = dist.get_world_size()
@@ -70,6 +81,18 @@ class MMEBModel(nn.Module):
 
         if model_config.meta_queries is not None and model_config.meta_queries > 0:
             self.meta_queries = [f'<meta_query_{i}>' for i in range(model_config.meta_queries)]
+
+        self.use_gradient_checkpointing = False
+
+
+    def gradient_checkpointing_enable(self, gradient_checkpointing_kwargs=None):
+        self.use_gradient_checkpointing = True
+        if hasattr(self.encoder, "gradient_checkpointing_enable"):
+            # unwrap if wrapped by DDP
+            if hasattr(self.encoder, "module"):
+                self.encoder.module.gradient_checkpointing_enable(gradient_checkpointing_kwargs=gradient_checkpointing_kwargs)
+            else:
+                self.encoder.gradient_checkpointing_enable(gradient_checkpointing_kwargs=gradient_checkpointing_kwargs)
 
     @torch.no_grad()
     def generate(self, input, return_hidden_states=True, return_decode_answer=False):
@@ -351,7 +374,7 @@ class MMEBModel(nn.Module):
                 inference_mode=False,
                 modules_to_save=modules_to_save
             )
-
+            base_model.enable_input_require_grads()
             base_model = get_peft_model(base_model, lora_config)
 
             if model_args.meta_queries is not None and model_args.meta_queries > 0:
@@ -438,6 +461,12 @@ class MMEBModel(nn.Module):
                 low_cpu_mem_usage=True,
                 config=config
             )
+        # elif model_args.model_backbone == QWEN2_5_VL:
+        #     from transformers import Qwen2_5_VLForConditionalGeneration
+        #     base_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(model_args.model_name, 
+        #                                                                     trust_remote_code=True,
+        #                                                                     torch_dtype=torch.bfloat16)
+
         elif model_args.model_backbone == PHI3V:
             config = AutoConfig.from_pretrained(model_args.model_name, trust_remote_code=True)
             config.use_cache = False
@@ -565,7 +594,6 @@ class MMEBModel(nn.Module):
         self.encoder.save_pretrained(output_dir)
 
     def forward(self, qry: Dict[str, Tensor] = None, tgt: Dict[str, Tensor] = None, *args, **kwargs):
-
         if qry is not None:
             qry_reps, qry_res = self.encode_input(qry, do_sft=self.model_config.do_sft_query)
         else:
@@ -591,24 +619,30 @@ class MMEBModel(nn.Module):
                         loss = loss + tgt_sft_loss
                 return {"qry_reps": qry_reps, "tgt_reps": tgt_reps, "qry_sft_loss": qry_sft_loss, "tgt_sft_loss": tgt_sft_loss, "loss": loss}
 
-            if self.is_ddp:
-                all_qry_reps = self._dist_gather_tensor(qry_reps)
-                all_tgt_reps = self._dist_gather_tensor(tgt_reps)
-            else:
-                all_qry_reps = qry_reps
-                all_tgt_reps = tgt_reps
+
+            # if self.is_ddp:
+            #     all_qry_reps = self._dist_gather_tensor(qry_reps)
+            #     all_tgt_reps = self._dist_gather_tensor(tgt_reps)
+            # else:
+            #     all_qry_reps = qry_reps
+            #     all_tgt_reps = tgt_reps
             
             # print(f"all_qry_reps: {all_qry_reps.shape}, all_tgt_reps: {all_tgt_reps.shape}")
 
-            scores = self.compute_similarity(all_qry_reps, all_tgt_reps)
-            scores = scores.view(all_qry_reps.size(0), -1)
-            target = torch.arange(scores.size(0), device=scores.device, dtype=torch.long)
-            target = target * (all_qry_reps.size(0) // all_tgt_reps.size(0))
-            cl_loss = self.cross_entropy(scores / self.temperature, target)
+            # scores = self.compute_similarity(all_qry_reps, all_tgt_reps)
+            # scores = scores.view(all_qry_reps.size(0), -1)
+            # target = torch.arange(scores.size(0), device=scores.device, dtype=torch.long)
+            # target = target * (all_qry_reps.size(0) // all_tgt_reps.size(0))
+            # cl_loss = self.cross_entropy(scores / self.temperature, target)
 
-            # if self.is_ddp:
-            #     cl_loss = cl_loss * self.world_size
+            # # if self.is_ddp:
+            # #     cl_loss = cl_loss * self.world_size
 
+            # loss_dict['cl_loss'] = cl_loss
+            cl_loss = self.loss_fn(x = qry_reps, y = tgt_reps, 
+                                   x_task_ids = qry['task_id'], y_task_ids = tgt['task_id'], 
+                                   temperature = self.temperature, 
+                                   inter_task_temperature = self.inter_task_temperature)
             loss_dict['cl_loss'] = cl_loss
 
         if self.model_config.do_sft_query:

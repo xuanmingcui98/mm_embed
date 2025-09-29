@@ -5,12 +5,11 @@ import torch.nn.functional as F
 
 
 class SimpleContrastiveLoss:
-    def __init__(self, temperature: float = 0.02, inter_task_temperature: float = None, use_symmetric_loss: bool = False):
-        self.temperature = temperature
-        self.inter_task_temperature = inter_task_temperature
+    def __init__(self, use_symmetric_loss: bool = False):
         self.use_symmetric_loss = use_symmetric_loss
 
-    def __call__(self, x: Tensor, y: Tensor, x_task_ids, y_task_ids, target: Tensor = None, reduction: str = 'mean') -> Tensor:
+    def __call__(self, x: Tensor, y: Tensor, x_task_ids, y_task_ids, target: Tensor = None,
+                 temperature: float = 0.02, inter_task_temperature: float = None, reduction: str = 'mean') -> Tensor:
         if target is None:
             target_per_qry = y.size(0) // x.size(0)
             target = torch.arange(
@@ -23,10 +22,10 @@ class SimpleContrastiveLoss:
         else:
             logits = torch.matmul(x, y.transpose(0, 1))
 
-        T = self.temperature
-        if self.inter_task_temperature is not None:
+        T = temperature
+        if inter_task_temperature is not None:
             same_task = x_task_ids.unsqueeze(1) == y_task_ids.unsqueeze(0)
-            T = torch.where(same_task, self.temperature, self.inter_task_temperature)
+            T = torch.where(same_task, temperature, inter_task_temperature)
 
         scaled_logits = logits / T
         if self.use_symmetric_loss:
@@ -40,19 +39,24 @@ class SimpleContrastiveLoss:
 
 
 class DistributedContrastiveLoss(SimpleContrastiveLoss):
-    def __init__(self, n_target: int = 0, scale_loss: bool = True, temperature: float = 0.02, inter_task_temperature: float = None, use_symmetric_loss: bool = False):
+    def __init__(self, n_target: int = 0, scale_loss: bool = True, use_symmetric_loss: bool = False):
         assert dist.is_initialized(), "Distributed training has not been properly initialized."
-        super().__init__(temperature, inter_task_temperature, use_symmetric_loss)
+        super().__init__(use_symmetric_loss)
         self.word_size = dist.get_world_size()
         self.rank = dist.get_rank()
         self.scale_loss = scale_loss
 
-    def __call__(self, x: Tensor, y: Tensor, x_task_ids, y_task_ids, **kwargs):
+    def __call__(self, x: Tensor, y: Tensor, x_task_ids, y_task_ids, temperature, inter_task_temperature, **kwargs):
         dist_x = self.gather_tensor(x)
         dist_y = self.gather_tensor(y)
         dist_x_task_ids = self.gather_tensor(x_task_ids)
         dist_y_task_ids = self.gather_tensor(y_task_ids)
-        loss = super().__call__(dist_x, dist_y, dist_x_task_ids, dist_y_task_ids, **kwargs)
+        loss = super().__call__(
+            x = dist_x, y = dist_y, 
+            x_task_ids = dist_x_task_ids, y_task_ids = dist_y_task_ids, 
+            temperature = temperature,
+            inter_task_temperature = inter_task_temperature, 
+            **kwargs)
         if self.scale_loss:
             loss = loss * self.word_size
         return loss

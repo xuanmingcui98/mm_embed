@@ -95,10 +95,17 @@ inference_results_newhf_flashattn/
 inference_results_old/
 inference_results_v2/
 merge_lora.py
-nextqa.parquet
+*.parquet
 orig_output_005.mp4
 output_005.mp4
 prompts_with_gt.py
 # src/data/generation_utils.py
 test.png
-youcook2.parquet
+*.mp4
+*.png
+tmp.py
+*.csv
+
+results/
+*.ttf
+*.ipynb

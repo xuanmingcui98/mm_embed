@@ -44,6 +44,13 @@ class ModelArguments:
     pooling_last_n_layers: int = field(default=None, metadata={"help": "number of last layers to use for pooling"})
     meta_queries: int = field(default=None, metadata={"help": "number of meta queries for the model, if set, it will add special tokens to the tokenizer and resize the embedding layer"})
     meta_queries_aggregate_type: str = field(default='mean', metadata={"help": "how to aggregate meta queries, mean, concat, late_interaction, attention_pooler"})
+    inter_task_temperature: float = field(
+        default=None, metadata={"help": "temperature for inter-task contrastive loss"}
+    )
+    learnable_temperature: bool = field(
+        default=False, metadata={"help": "learnable temperature"}
+    )
+
 
 @dataclass
 class DataArguments:
@@ -72,7 +79,7 @@ class DataArguments:
     apply_chat_template: bool = field(default=True, metadata={"help": "apply chat template to the dataset"})
     target_description_dir: str = field(default=None, metadata={"help": "directory for target descriptions"})
     debug_prompt: bool = field(default=False, metadata={"help": "debug mode, will not use the dataset_config and will use the dataset_name and subset_name instead"})
-    rewrites_for_mm_only: bool = field(default=True, metadata={"help": "only use rewrites for multi-modal input"})
+    rewrites_for_mm_only: bool = field(default=False, metadata={"help": "only use rewrites for multi-modal input"})
     max_rewrite_len: int = field(default=500, metadata={"help": "maximum rewrite length"})
     num_shards: int = field(default=2, metadata={"help": "number of shards to split the dataset into, useful for debugging with smaller datasets or distributed training"})
     rebuild_cache: bool = field(default=False, metadata={"help": "rebuild the cache, otherwise will load from existing cache if available"})
@@ -102,11 +109,12 @@ class TrainingArguments(TrainingArguments):
     sft_loss_scalar: float = field(
         default=1, metadata={"help": "scalar for contrastive loss"}
     )
-    inter_task_temperature: float = field(
-        default=None, metadata={"help": "temperature for inter-task contrastive loss"}
-    )
+
     use_symmetric_loss: bool = field(
         default=False, metadata={"help": "use symmetric loss for contrastive loss"}
+    )
+    deepspeed_stage: int = field(
+        default=1, metadata={"help": "deepspeed zero optimization stage"}
     )
 
 @dataclass

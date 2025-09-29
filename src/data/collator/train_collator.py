@@ -1,20 +1,20 @@
 from itertools import repeat
 from typing import Optional
 from torch.jit import isinstance
-
+from typing import Any
 import logging
 from dataclasses import dataclass
 from transformers import ProcessorMixin, AutoProcessor, AutoTokenizer
 from ...arguments import DataArguments, ModelArguments, TrainingArguments
 import torch
 from qwen_vl_utils import smart_resize
-
+from io import BytesIO
 from ...model.processor import LLAVA_NEXT, QWEN2_VL, QWEN2_5_VL, \
     QWEN2_VL_TOKENSELECTION, QWEN2_5_VL_TOKENSELECTION, PHI3V, process_vlm_inputs_fns
 from PIL import Image
 import io
 from ...utils import print_rank, print_master
-
+from trl.trainer.sft_trainer import DataCollatorForVisionLanguageModeling, prepare_multimodal_messages
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +120,105 @@ class TrainTextImageDataCollator:
         inputs = {'text': texts, 'image': images}
         return inputs
 
+def safe_open_image(image):
+    try:
+        if isinstance(image, bytes):
+            img = Image.open(BytesIO(image)).convert("RGB")
+        elif isinstance(image, str):
+            img = Image.open(image).convert("RGB")
+        elif isinstance(image, Image.Image):
+            img = image
+        else:
+            raise Exception
+        return img
+    except Exception as e:
+        print(f"Error loading image {image}: {e}")
+        return None
+
+@dataclass
+class Qwen2_5VLMultimodalProcessor(DataCollatorForVisionLanguageModeling):
+
+    def _collate_language_modeling(self, examples):
+        images = [example["images"] for example in examples if example["images"]]
+        videos = [example["videos"] for example in examples if example["videos"]]
+        if len(images) == 0:
+            images = None
+        if len(videos) == 0:
+            videos = None
+
+        if "messages" in examples[0]:  # conversational case
+            for example in examples:
+                prepare_multimodal_messages(example["messages"], len(example["images"]))
+            messages = [example["messages"] for example in examples]
+            texts = self.processor.apply_chat_template(messages)
+        elif self.dataset_text_field in examples[0]:  # standard case
+            texts = [example[self.dataset_text_field] for example in examples]
+        else:
+            raise KeyError("The input examples must contain either 'text' for conversational data or 'text' for standard " "data.")
+
+        output = self.processor(
+            images=images,
+            text=texts,
+            videos=videos,
+            padding=True,
+            padding_side="left",
+            pad_to_multiple_of=self.pad_to_multiple_of,
+            truncation=self.max_length is not None,
+            max_length=self.max_length,
+            return_tensors=self.return_tensors,
+            add_special_tokens=False,  # to avoid adding the BOS, twice see https://huggingface.co/blog/qgallouedec/gotchas-in-tokenizer-behavior#7-chat-template-and-tokenization-dont-compose-due-to-special-tokens
+        )
+
+        return output
+
+def get_inputs(examples, text_key, visual_key):
+    # return a dict of lists of text, image and video
+    texts, images, videos = [], [], []
+    for example in examples:
+        texts.append(example[text_key])
+        vis_input = example[visual_key]
+        if vis_input['bytes'][0]:
+            visuals = [safe_open_image(x) for x in vis_input['bytes']]
+        elif vis_input['paths'][0]:
+            visuals = [safe_open_image(x) for x in vis_input['paths']]
+        else:
+            visuals = []
+
+        is_video = len(visuals) > 1
+
+        if is_video:
+            videos.append(vis_input)
+        else:
+            images.append(vis_input)
+
+    return {"messages": texts,
+            "images": images,
+            "videos": videos}
+
+@dataclass
+class ContrastiveDataCollator:
+
+    processor: Any
+
+    def __post_init__(self):
+        self.processor = Qwen2_5VLMultimodalProcessor(self.processor)
+
+    def __call__(self, examples):
+
+        qry_inputs = self.processor(get_inputs(examples, "query_text", "query_image"))
+        pos_inputs = self.processor(get_inputs(examples, "pos_text", "pos_image"))
+        # neg_inputs = self.processor(get_inputs(examples, "neg_text", "neg_image"))
+        bs = len(qry_inputs['text'])
+        assert bs > 0, 'An empty batch'
+
+        qry_inputs['text'] = [e['query_text'] for e in examples]
+        pos_inputs['text'] = [e['pos_text'] for e in examples]
+        qry_inputs['global_dataset_name'] = [e['global_dataset_name'] for e in examples]
+        pos_inputs['global_dataset_name'] = [e['global_dataset_name'] for e in examples]
+        qry_inputs['task_id'] = torch.tensor([e['task_id'] for e in examples])
+        pos_inputs['task_id'] = torch.tensor([e['task_id'] for e in examples])
+        return qry_inputs, pos_inputs
+        
 
 @dataclass
 class MultimodalDataCollator:
@@ -195,16 +294,16 @@ class MultimodalDataCollator:
             raise RuntimeError(f"Expect batch size {self.batch_size}, but got batch size of {bs}")
             pass
         process_fn = process_vlm_inputs_fns[self.training_args.model_backbone]
-        processed_qry_inputs = process_fn(qry_inputs, processor=self.processor, max_length=self.data_args.max_len, model_backbone=self.model_args.model_backbone)
-        processed_pos_inputs = process_fn(pos_inputs, processor=self.processor, max_length=self.data_args.max_len, model_backbone=self.model_args.model_backbone)
-        processed_qry_inputs['text'] = [e['query_text'] for e in examples]
-        processed_pos_inputs['text'] = [e['pos_text'] for e in examples]
-        processed_qry_inputs['global_dataset_name'] = [e['global_dataset_name'] for e in examples]
-        processed_pos_inputs['global_dataset_name'] = [e['global_dataset_name'] for e in examples]
-        processed_qry_inputs['task_id'] = torch.tensor([e['task_id'] for e in examples])
-        processed_pos_inputs['task_id'] = torch.tensor([e['task_id'] for e in examples])
-        # print_rank(f"\t\tQry collator: processed_qry_inputs['input_ids'].shape={processed_qry_inputs['input_ids'].shape}\t\tPos collator: processed_pos_inputs['input_ids'].shape={processed_pos_inputs['input_ids'].shape}")
-        return processed_qry_inputs, processed_pos_inputs
+        qry_inputs = process_fn(qry_inputs, processor=self.processor, max_length=self.data_args.max_len, model_backbone=self.model_args.model_backbone)
+        pos_inputs = process_fn(pos_inputs, processor=self.processor, max_length=self.data_args.max_len, model_backbone=self.model_args.model_backbone)
+        qry_inputs['text'] = [e['query_text'] for e in examples]
+        pos_inputs['text'] = [e['pos_text'] for e in examples]
+        qry_inputs['global_dataset_name'] = [e['global_dataset_name'] for e in examples]
+        pos_inputs['global_dataset_name'] = [e['global_dataset_name'] for e in examples]
+        qry_inputs['task_id'] = torch.tensor([e['task_id'] for e in examples])
+        pos_inputs['task_id'] = torch.tensor([e['task_id'] for e in examples])
+        # print_rank(f"\t\tQry collator: qry_inputs['input_ids'].shape={qry_inputs['input_ids'].shape}\t\tPos collator: pos_inputs['input_ids'].shape={pos_inputs['input_ids'].shape}")
+        return qry_inputs, pos_inputs
 
 def get_visual_token_ids(processor):
     if "Qwen2VLProcessor" in str(processor.__class__):  # Check if the processor is Qwen2VLProcessor

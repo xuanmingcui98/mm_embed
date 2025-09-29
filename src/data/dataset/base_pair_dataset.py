@@ -91,6 +91,7 @@ class BaseDatasetProcessor:
         self.model_backbone = self.model_args.model_backbone
         self.image_resolution = self.dataset_config.get('image_resolution')
         self.instruction = instruction
+        self.encode_side = self.dataset_config.get('encode_side', 'query')
 
         self.query_descriptions = self.target_descriptions = None
         if data_args.query_description_dir is not None:
@@ -256,9 +257,9 @@ class BaseDatasetProcessor:
                 if self.target_descriptions:
                     pos_description = self.target_descriptions[(pos_text, pos_image_path)]
 
-                if not qry_image_path and self.data_args.rewrites_for_mm_only:
+                if (not qry_image_path and self.data_args.rewrites_for_mm_only) or self.encode_side == 'target':
                     query_description = None
-                if not pos_image_path and self.data_args.rewrites_for_mm_only:
+                if (not pos_image_path and self.data_args.rewrites_for_mm_only) or self.encode_side == 'query':
                     pos_description = None
                 qry_text = self.format_text_for_chat_template(is_query=True, text=qry_text, image_path=qry_image_path, add_generation_prompt=False, description=query_description)
                 pos_text = self.format_text_for_chat_template(is_query=False, text=pos_text, image_path=pos_image_path, add_generation_prompt=False, description=pos_description)
@@ -364,9 +365,9 @@ class VideoDatasetProcessor(BaseDatasetProcessor):
                     else:
                         pos_image_input = pos_image['paths'][0] or pos_image['bytes'][0]
                 
-                if not query_image and self.data_args.rewrites_for_mm_only:
+                if (not query_image and self.data_args.rewrites_for_mm_only) or self.encode_side == 'target':
                     query_description = None
-                if not pos_image and self.data_args.rewrites_for_mm_only:
+                if (not pos_image and self.data_args.rewrites_for_mm_only) or self.encode_side == 'query':
                     target_description = None
                 query_text = self.format_text_for_chat_template(
                     is_query=True, text=query_text, image_path=query_image_input, video_path=query_video_input, 

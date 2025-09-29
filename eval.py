@@ -190,7 +190,8 @@ def main():
 
     args = args | vars(eval_args)  
     model_args, data_args, training_args = parser.parse_dict(args)
-        
+    # setattr(data_args, "resize_min_pixels", 56 * 56)
+    # setattr(data_args, "resize_max_pixels", 2359296)
 
     # --- Model Loading ---
     hf_config = AutoConfig.from_pretrained(model_args.model_name, trust_remote_code=True)

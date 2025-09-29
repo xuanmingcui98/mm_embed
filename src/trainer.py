@@ -76,7 +76,6 @@ class MMEBTrainer(Trainer):
         self.model_args = kwargs.get("model").model_config
 
         super(MMEBTrainer, self).__init__(*args, **kwargs)
-
         self.is_ddp = dist.is_initialized()
         self.processor = self.processing_class
         self._dist_loss_scale_factor = dist.get_world_size() if self.is_ddp else 1
@@ -683,7 +682,6 @@ class MMEBTrainer(Trainer):
         model.train()
         if hasattr(self.optimizer, "train") and callable(self.optimizer.train):
             self.optimizer.train()
-
         inputs = self._prepare_inputs(inputs)
         if is_sagemaker_mp_enabled():
             loss_mb = smp_forward_backward(model, inputs, self.args.gradient_accumulation_steps)
@@ -746,7 +744,6 @@ class MMEBTrainer(Trainer):
 
             return loss_dict
         
-
     def _maybe_log_save_evaluate(
         self, tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval, start_time, learning_rate=None
     ):
@@ -769,6 +766,11 @@ class MMEBTrainer(Trainer):
                 tr_loss[k] -= tr_loss[k]
             if grad_norm is not None:
                 logs["grad_norm"] = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else grad_norm
+            if hasattr(self.model, "module"):
+                self.model = self.model.module
+            logs['temperature'] = self.model.temperature.item()
+            if self.model.inter_task_temperature is not None:
+                logs['inter_task_temperature'] = self.model.inter_task_temperature.item()
             if learning_rate is not None:
                 logs["learning_rate"] = learning_rate
             else:
@@ -781,6 +783,8 @@ class MMEBTrainer(Trainer):
                 #         logs["pooler_learning_rate"] = learning_rates[0]
                 #     else:
                 #         logs["llm_learning_rate"] = learning_rates[0]
+                if hasattr(self.model, "module"):
+                    self.model = self.model.module
                 if self.model.pooling_module is None:
                     logs["llm_learning_rate"] = learning_rates[0]
                 else:
@@ -816,7 +820,7 @@ class GradCacheLateProcessTrainer(MMEBTrainer):
         self.is_ddp = dist.is_initialized()
         self._dist_loss_scale_factor = dist.get_world_size() if self.is_ddp else 1
         loss_fn_cls = DistributedContrastiveLoss if self.is_ddp else SimpleContrastiveLoss
-        loss_fn = loss_fn_cls(temperature=self.model.temperature, inter_task_temperature=self.args.inter_task_temperature, use_symmetric_loss=self.args.use_symmetric_loss)
+        loss_fn = loss_fn_cls()
         # process_fn = functools.partial(process_vlm_inputs_fns[self.args.model_backbone], processor=self.processing_class, max_length=self.max_length)
 
         self.gc = GradCache(
@@ -844,10 +848,17 @@ class GradCacheLateProcessTrainer(MMEBTrainer):
         targets = batch_to_device(targets, device)
         queries, targets = {'qry': queries}, {'tgt': targets}
 
+        unwrapped_model = self.model
+        if hasattr(self.model, "module"):
+            unwrapped_model = self.model.module
+        
+        temperature = unwrapped_model.temperature
+        inter_task_temperature = unwrapped_model.inter_task_temperature
+
         _distributed = self.args.local_rank > -1
         if _distributed:
             self.gc.models = [model, model]
-            loss_dict = self.gc(queries, targets, no_sync_except_last=_distributed)
+            loss_dict = self.gc(queries, targets, no_sync_except_last=_distributed, temperature=temperature, inter_task_temperature=inter_task_temperature)
         else:
             loss_dict = model(queries, targets)
 

@@ -63,7 +63,6 @@ class MomentSeekerEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         query_description = None
         # --- Build query text/image depending on input modality ---
         if isinstance(input_frames, str) and input_frames.endswith(".mp4"):
-            # Text: video query (no tokens; parent chat-template will handle tokens if enabled) 
 
             # if self.data_args.apply_chat_template:
             #     query_text = self.instruction['query']['video'].format(text=query)
@@ -103,7 +102,7 @@ class MomentSeekerEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             # Use the provided single image (stored under frame_root as "query_<fname>")
             input_image_path = os.path.join(frame_root, f"query_{input_frames}")
             if self.query_descriptions is not None:
-                query_description = self.query_descriptions.get(f"query_{input_frames}")
+                query_description = self.query_descriptions.get((f"query_{input_frames}",))
                 if not query_description:
                     print(f'No query description found for (query_{input_frames},) for dataset {self.dataset_config["dataset_name"]}')
             query_image = {
@@ -148,10 +147,10 @@ class MomentSeekerEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             })
 
             if self.target_descriptions:
-                target_desc = self.target_descriptions.get((os.path.join("video_frames", clip_name),))
+                target_desc = self.target_descriptions.get((clip_name,))
                 target_description.append(target_desc)
-                # if not target_desc:
-                #     print(f'No target description found for ({os.path.join("video_frames", clip_name)},) for dataset {self.dataset_config["dataset_name"]}')
+                if not target_desc:
+                    print(f'No target description found for ({os.path.join("video_frames", clip_name)},) for dataset {self.dataset_config["dataset_name"]}')
             else:
                 target_description.append(None)
             cand_clip_names.append(clip_frame_dir)

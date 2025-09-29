@@ -160,8 +160,18 @@ def load_processor(model_args, data_args=None):
             min_pixels, max_pixels = data_args.resize_min_pixels, data_args.resize_max_pixels
         size = {"shortest_edge": min_pixels, "longest_edge": max_pixels, "min_pixels": min_pixels, "max_pixels": max_pixels}
         image_processor = Qwen2_5_VLImageProcessor.from_pretrained(model_name_or_path, size=size)
+        # image_processor = Qwen2_5_VLImageProcessor.from_pretrained(model_name_or_path)
         tokenizer = Qwen2TokenizerFast.from_pretrained(model_name_or_path, padding_side=padding_side)
         processor = Qwen2_5_VLProcessor.from_pretrained(model_name_or_path, image_processor=image_processor, tokenizer=tokenizer)
+
+        # from transformers import Qwen2_5_VLProcessor
+        # pixel_kwargs = {}
+        # if data_args is not None:
+        #     if data_args.resize_min_pixels:
+        #         pixel_kwargs['min_pixels'] = data_args.resize_min_pixels
+        #     if data_args.resize_max_pixels:
+        #         pixel_kwargs['max_pixels'] = data_args.resize_max_pixels
+        # processor = Qwen2_5_VLProcessor.from_pretrained(model_name_or_path, **pixel_kwargs)
     else:
         from transformers import AutoProcessor
         processor = AutoProcessor.from_pretrained(
@@ -291,6 +301,7 @@ def process_fn(model_inputs: dict, processor, model_backbone=None, **kwargs):
 process_vlm_inputs_fns = {
     QWEN2_VL: Qwen2_VL_process_fn,
     QWEN2_5_VL: Qwen2_VL_process_fn,
+    # QWEN2_5_VL: process_fn,
     INTERNVL3: process_fn
 
 }

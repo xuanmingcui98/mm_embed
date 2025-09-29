@@ -340,12 +340,12 @@ Answer: Pulling a disc out of a paper sleeve.
 
 Now, answer for the given video.""",
 
-    "MomentSeeker": """You are given a query and a candidate video clip in a moment (video) retrieval task. The query can be:
+    "MomentSeeker": """You are given a query that refers to a video clip in a moment (video) retrieval task. The query can be:
 - Text only
 - Text plus an image
 - Text plus query video
 
-Your task is to reason about what the query implies, describe in detail what the target video clip should show, and finally provide a concise summary.
+Your task is to reason about what the query implies, describe in detail what the target video clip should look like, and finally provide a concise summary.
 
 Instructions:
 - Inside <think> ... </think>:

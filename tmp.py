@@ -27,6 +27,7 @@ from src.data.prompts import extract_query, extract_target
 import cv2
 import numpy as np
 from qwen_vl_utils import process_vision_info
+from transformers import Qwen2_5_VLProcessor
 
 import logging
 
