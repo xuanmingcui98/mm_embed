@@ -74,9 +74,9 @@ class MomentSeekerEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             query_frame_dir  = os.path.join(frame_root, "video_frames", query_video_name)
 
             if self.query_descriptions is not None:
-                query_description = self.query_descriptions.get((query, os.path.join("video_frames", query_video_name)))
+                query_description = self.query_descriptions.get((query, query_video_name))
                 if not query_description:
-                    print(f'No query description found for ({query}, {os.path.join("video_frames", query_video_name)}) for dataset {self.dataset_config["dataset_name"]}')
+                    print(f'No query description found for ({query}, {query_video_name}) for dataset {self.dataset_config["dataset_name"]}')
             # Extract frames if needed, then load
             if not os.path.exists(query_frame_dir):
                 query_video_path = os.path.join(video_root, input_frames)

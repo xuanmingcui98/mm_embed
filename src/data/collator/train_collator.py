@@ -136,29 +136,27 @@ def safe_open_image(image):
         return None
 
 @dataclass
-class Qwen2_5VLMultimodalProcessor(DataCollatorForVisionLanguageModeling):
+class Qwen2_5VLMultimodalProcessor:
 
-    def _collate_language_modeling(self, examples):
-        images = [example["images"] for example in examples if example["images"]]
-        videos = [example["videos"] for example in examples if example["videos"]]
+    processor: ProcessorMixin
+    max_length: Optional[int] = None
+    completion_only_loss: bool = False  # default not used in practice; SFTTrainer always passes the relevant value
+    pad_to_multiple_of: Optional[int] = None
+    return_tensors: str = "pt"
+
+    def __call__(self, examples):
+
+        text = examples['text']
+        images = examples['images']
+        videos = examples['videos']
         if len(images) == 0:
             images = None
         if len(videos) == 0:
             videos = None
 
-        if "messages" in examples[0]:  # conversational case
-            for example in examples:
-                prepare_multimodal_messages(example["messages"], len(example["images"]))
-            messages = [example["messages"] for example in examples]
-            texts = self.processor.apply_chat_template(messages)
-        elif self.dataset_text_field in examples[0]:  # standard case
-            texts = [example[self.dataset_text_field] for example in examples]
-        else:
-            raise KeyError("The input examples must contain either 'text' for conversational data or 'text' for standard " "data.")
-
         output = self.processor(
+            text=text,
             images=images,
-            text=texts,
             videos=videos,
             padding=True,
             padding_side="left",
@@ -177,21 +175,22 @@ def get_inputs(examples, text_key, visual_key):
     for example in examples:
         texts.append(example[text_key])
         vis_input = example[visual_key]
-        if vis_input['bytes'][0]:
+        if vis_input and vis_input['bytes'][0]:
             visuals = [safe_open_image(x) for x in vis_input['bytes']]
-        elif vis_input['paths'][0]:
+        elif vis_input and vis_input['paths'][0]:
             visuals = [safe_open_image(x) for x in vis_input['paths']]
         else:
-            visuals = []
+            visuals = [None]
 
         is_video = len(visuals) > 1
 
-        if is_video:
-            videos.append(vis_input)
-        else:
-            images.append(vis_input)
+        if visuals[0]:
+            if is_video:
+                videos.append(visuals)
+            else:
+                images.append(visuals)
 
-    return {"messages": texts,
+    return {"text": texts,
             "images": images,
             "videos": videos}
 
@@ -208,8 +207,6 @@ class ContrastiveDataCollator:
         qry_inputs = self.processor(get_inputs(examples, "query_text", "query_image"))
         pos_inputs = self.processor(get_inputs(examples, "pos_text", "pos_image"))
         # neg_inputs = self.processor(get_inputs(examples, "neg_text", "neg_image"))
-        bs = len(qry_inputs['text'])
-        assert bs > 0, 'An empty batch'
 
         qry_inputs['text'] = [e['query_text'] for e in examples]
         pos_inputs['text'] = [e['pos_text'] for e in examples]

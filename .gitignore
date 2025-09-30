@@ -50,7 +50,7 @@ workspace.xml
 ehthumbs.db
 Thumbs.db
 descriptions*
-
+test.sh
 
 runs/*
 slurm_logs/*
@@ -87,7 +87,7 @@ eval_generation_retrieval_train.py
 generation_prompts_qwen_with_gt.py
 get_result_summary.py
 inference_generation_hf.py
-# inference_generation_hf_ddp.py
+inference_generation_hf_ddp.py
 inference_results/
 inference_results2/
 inference_results_newhf/

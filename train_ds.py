@@ -20,7 +20,7 @@ import json
 from functools import wraps
 from transformers import HfArgumentParser, set_seed
 from src.arguments import ModelArguments, DataArguments, TrainingArguments
-from src.data.collator.train_collator import MultimodalDataCollator
+from src.data.collator.train_collator import MultimodalDataCollator, ContrastiveDataCollator
 from src.data.loader.mixed_dataset import init_mixed_dataset
 from src.model.model import MMEBModel
 from src.trainer import GradCacheLateProcessTrainer, MMEBTrainer
@@ -83,7 +83,11 @@ def main():
     with open(data_args.dataset_config, 'r') as yaml_file:
         dataset_config = yaml.safe_load(yaml_file)
         train_dataset = init_mixed_dataset(dataset_config, model_args, data_args, training_args, processor)
-    train_collator = MultimodalDataCollator(processor, model_args, data_args, training_args)
+
+    if 'qwen2_5_vl' in model_args.model_backbone:
+        train_collator = ContrastiveDataCollator(processor)
+    else:
+        train_collator = MultimodalDataCollator(processor, model_args, data_args, training_args)
 
     trainer_cls = GradCacheLateProcessTrainer if training_args.grad_cache else MMEBTrainer
 
@@ -97,15 +101,10 @@ def main():
           training_args.num_train_epochs * train_dataset.num_rows // (training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps * training_args.world_size)
 
     # if "32b" in model_args.model_name.lower():
-    setattr(training_args, "deepspeed", { "train_batch_size": "auto",
-                    "train_micro_batch_size_per_gpu": "auto",
-                    "gradient_accumulation_steps": "auto",
-                    "zero_optimization": {
-                        "stage":training_args.deepspeed_stage
-                    }},)  
     setattr(training_args, "ddp_find_unused_parameters", False)
-    setattr(training_args, "gradient_checkpointing", True)
     setattr(training_args, "gradient_checkpointing_kwargs", {"use_reentrant": False})
+    do_gradient_checkpointing = training_args.deepspeed and "zero3" not in training_args.deepspeed
+    setattr(training_args, "gradient_checkpointing", do_gradient_checkpointing)
 
     trainer = trainer_cls(
         model=model,
@@ -171,7 +170,6 @@ def main():
     else:
         dump()
 
-    # trainer.model = trainer.accelerator.prepare(trainer.model)
     trainer.train(resume_from_checkpoint=resume_checkpoint_dir)
     trainer.save_model(training_args.output_dir)
 

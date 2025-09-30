@@ -84,6 +84,8 @@ class DataArguments:
     num_shards: int = field(default=2, metadata={"help": "number of shards to split the dataset into, useful for debugging with smaller datasets or distributed training"})
     rebuild_cache: bool = field(default=False, metadata={"help": "rebuild the cache, otherwise will load from existing cache if available"})
     cache_dataset_dir: str = field(default=None, metadata={"help": "directory to save the processed dataset cache"})
+    cluster_path: str = field(default="")
+
 
 @dataclass
 class TrainingArguments(TrainingArguments):

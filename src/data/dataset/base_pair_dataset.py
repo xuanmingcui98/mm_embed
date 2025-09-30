@@ -2,7 +2,7 @@ from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 from functools import partial
-from datasets import Features, Value, Sequence, IterableDataset
+from datasets import Features, Value, Sequence
 import pickle, os
 from datasets import load_dataset, concatenate_datasets
 from ...model.processor import PHI3V, VLM_IMAGE_TOKENS, VLM_VIDEO_TOKENS
@@ -17,7 +17,9 @@ from ..utils.dataset_utils import sample_dataset
 from ..utils.vision_utils import save_frames, load_frames, sample_frames
 import torch
 from ..loader.mixed_dataset import add_metainfo_hook
-
+import torch
+import json
+import numpy as np
 
 DATASET_INSTRUCTION = {
     'Kinetics-700': 'Recognize the category of the video content.',
@@ -118,6 +120,21 @@ class BaseDatasetProcessor:
 
         self.dataset = self._load_hf_dataset()
         # self.add_signature_columns()
+        self.clusters = os.path.join(data_args.cluster_path, f"{self.subset_name}_clusters.json")
+        if os.path.exists(self.clusters):
+            all_clusters = []
+            if self.clusters.endswith('json'):
+                with open(self.clusters, 'r') as file:
+                    clusters = json.load(file)
+            elif self.clusters.endswith('jsonl'):
+                with open(self.clusters, 'r') as file:
+                    clusters = [json.loads(line) for line in file]
+            for c in clusters:
+                all_clusters.append(c['cluster'])
+            if len(all_clusters) < len(self.dataset):
+                all_clusters += [-1] * (len(self.dataset) - len(all_clusters))
+            cluster_idx = np.argsort(all_clusters)
+            self.dataset = self.dataset.select(cluster_idx)
 
         if self.data_args.debug_prompt:
             print_master(f"Debug mode enabled")
@@ -142,7 +159,7 @@ class BaseDatasetProcessor:
         #     n_workers_per_node = 8 * self.dataset_config['world_size'] * n_workers_per_node
 
         if not self.data_args.debug_prompt:
-            self.dataset = self.dataset.to_iterable_dataset(num_shards=n_workers_per_node)
+            self.dataset = self.dataset.to_iterable_dataset(num_shards=8)
             setattr(self.dataset, 'num_rows', num_rows)
 
         self.dataset = self.dataset.map(
@@ -247,7 +264,7 @@ class BaseDatasetProcessor:
                 batch_dict['pos_text'], batch_dict['pos_image_path'],
                 batch_dict.get('neg_text', [''] * batch_size), batch_dict.get('neg_image_path', [None] * batch_size)):
             if (not qry_text and not qry_image_path) or (not pos_text and not pos_image_path):
-                print("empty inputs")
+                print(f"empty inputs from {self.subset_name}")
                 continue
 
             if data_args.apply_chat_template:
@@ -257,9 +274,9 @@ class BaseDatasetProcessor:
                 if self.target_descriptions:
                     pos_description = self.target_descriptions[(pos_text, pos_image_path)]
 
-                if (not qry_image_path and self.data_args.rewrites_for_mm_only) or self.encode_side == 'target':
+                if (not qry_image_path and self.data_args.rewrites_for_mm_only): # or self.encode_side == 'target':
                     query_description = None
-                if (not pos_image_path and self.data_args.rewrites_for_mm_only) or self.encode_side == 'query':
+                if (not pos_image_path and self.data_args.rewrites_for_mm_only): # or self.encode_side == 'query':
                     pos_description = None
                 qry_text = self.format_text_for_chat_template(is_query=True, text=qry_text, image_path=qry_image_path, add_generation_prompt=False, description=query_description)
                 pos_text = self.format_text_for_chat_template(is_query=False, text=pos_text, image_path=pos_image_path, add_generation_prompt=False, description=pos_description)
@@ -365,9 +382,9 @@ class VideoDatasetProcessor(BaseDatasetProcessor):
                     else:
                         pos_image_input = pos_image['paths'][0] or pos_image['bytes'][0]
                 
-                if (not query_image and self.data_args.rewrites_for_mm_only) or self.encode_side == 'target':
+                if (not query_image and self.data_args.rewrites_for_mm_only): # or self.encode_side == 'target':
                     query_description = None
-                if (not pos_image and self.data_args.rewrites_for_mm_only) or self.encode_side == 'query':
+                if (not pos_image and self.data_args.rewrites_for_mm_only): # or self.encode_side == 'query':
                     target_description = None
                 query_text = self.format_text_for_chat_template(
                     is_query=True, text=query_text, image_path=query_image_input, video_path=query_video_input, 

@@ -283,7 +283,7 @@ class MMEBModel(nn.Module):
                 torch_dtype=torch.bfloat16,
                 low_cpu_mem_usage=True,
             )
-        elif model_backbone in [QWEN2_VL, QWEN2_5_VL]:
+        elif model_backbone in [QWEN2_VL]:
             config._attn_implementation = "flash_attention_2"
             config.padding_side = "left"
             config.use_cache = False
@@ -293,6 +293,15 @@ class MMEBModel(nn.Module):
                 torch_dtype=torch.bfloat16,
                 low_cpu_mem_usage=True,
             )
+        elif model_args.model_backbone == QWEN2_5_VL:
+            from transformers import Qwen2_5_VLForConditionalGeneration
+            # config._attn_implementation = "flash_attention_2" 
+            config._attn_implementation = "sdpa" 
+            config.padding_side = "left"
+            config.use_cache = False
+            base_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(model_args.model_name, 
+                                                                            config=config,
+                                                                            torch_dtype=torch.bfloat16)
         elif model_backbone in [PLM]:
             # config._attn_implementation = "flash_attention_2"
             config.padding_side = "left"
@@ -451,7 +460,7 @@ class MMEBModel(nn.Module):
 
         processor = load_processor(model_args, data_args=data_args)
         print_master(f'Loading backbone [{model_args.model_backbone}] from {model_name_or_path}')
-        if model_args.model_backbone in {LLAVA_NEXT, QWEN2_VL, QWEN2_5_VL, QWEN2_VL_TOKENSELECTION, QWEN2_5_VL_TOKENSELECTION, E5_V}:
+        if model_args.model_backbone in {LLAVA_NEXT, QWEN2_VL, QWEN2_VL_TOKENSELECTION, QWEN2_5_VL_TOKENSELECTION, E5_V}:
             config = AutoConfig.from_pretrained(model_args.model_name, trust_remote_code=True)
             config._attn_implementation = "flash_attention_2"
             config.vision_config._attn_implementation = "flash_attention_2"
@@ -461,11 +470,11 @@ class MMEBModel(nn.Module):
                 low_cpu_mem_usage=True,
                 config=config
             )
-        # elif model_args.model_backbone == QWEN2_5_VL:
-        #     from transformers import Qwen2_5_VLForConditionalGeneration
-        #     base_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(model_args.model_name, 
-        #                                                                     trust_remote_code=True,
-        #                                                                     torch_dtype=torch.bfloat16)
+        elif model_args.model_backbone == QWEN2_5_VL:
+            from transformers import Qwen2_5_VLForConditionalGeneration
+            base_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(model_args.model_name, 
+                                                                            trust_remote_code=True,
+                                                                            torch_dtype=torch.bfloat16)
 
         elif model_args.model_backbone == PHI3V:
             config = AutoConfig.from_pretrained(model_args.model_name, trust_remote_code=True)

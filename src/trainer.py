@@ -109,11 +109,11 @@ class MMEBTrainer(Trainer):
         os.makedirs(output_dir, exist_ok=True)
 
         if state_dict is None:
-            encoder_state_dict = self.model.encoder.state_dict()
+            state_dict = self.model.encoder.state_dict()
 
-        encoder_state_dict = {k.replace("encoder.", "") : v for k, v in encoder_state_dict.items()}
+        state_dict = {k.replace("encoder.", "") : v for k, v in state_dict.items()}
         self.model.encoder.save_pretrained(
-            output_dir, state_dict=encoder_state_dict, safe_serialization=self.args.save_safetensors
+            output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors
         )
 
         if self.tokenizer is not None:

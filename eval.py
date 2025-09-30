@@ -224,163 +224,166 @@ def main():
     os.makedirs(encode_output_path, exist_ok=True)
     # --- Main Evaluation Loop ---
     for dataset_idx, (dataset_name, task_config) in enumerate(dataset_configs.items()):
-        # 0. load dataset
-        if dist.is_initialized():
-            dist.barrier()
-        print_master(f"--- Evaluating {dataset_name} ---")
-
-        if os.path.exists(os.path.join(encode_output_path, f"{dataset_name}_score.json")):
-            print_master(f"Skipping {dataset_name} as it has already been evaluated.")
-            continue
-
-        query_embed_path = os.path.join(encode_output_path, f"{dataset_name}_qry")
-        cand_embed_path = os.path.join(encode_output_path, f"{dataset_name}_tgt")
-        dataset_info_path = os.path.join(encode_output_path, f"{dataset_name}_info.jsonl")
-
-        do_query = not os.path.exists(query_embed_path) or not os.path.exists(dataset_info_path)
-        do_cand = not os.path.exists(cand_embed_path)
-
-        if do_query or do_cand:
-            if data_args.data_basedir is not None:
-                # Construct full paths for data files if --data_basedir is provided
-                for key in ["image_root", "video_root", "frame_root", "clip_root", "data_path"]:
-                    if data_args.data_basedir and task_config.get(key):
-                        task_config[key] = os.path.join(data_args.data_basedir, task_config[key])
-
-            full_eval_qry_dataset, full_eval_cand_dataset = AutoPairEvalDataset.instantiate(model_args=model_args, data_args=data_args, training_args=training_args, processor=processor, **task_config)
-
-            eval_qry_dataset, eval_cand_dataset = full_eval_qry_dataset, full_eval_cand_dataset
-            # Pad datasets to be divisible by world_size before splitting
+        try:
+            # 0. load dataset
             if dist.is_initialized():
-                padded_qry_dataset, _ = pad_dataset_to_divisible(full_eval_qry_dataset, world_size)
-                padded_cand_dataset, _ = pad_dataset_to_divisible(full_eval_cand_dataset, world_size)
-                eval_qry_dataset = split_dataset_by_node(padded_qry_dataset, rank=local_rank, world_size=world_size)
-                eval_cand_dataset = split_dataset_by_node(padded_cand_dataset, rank=local_rank, world_size=world_size)
-            else:
-                padded_qry_dataset, padded_cand_dataset = full_eval_qry_dataset, full_eval_cand_dataset
+                dist.barrier()
+            print_master(f"--- Evaluating {dataset_name} ---")
 
-        # --- 1. Compute Query Embeddings ---
-        if do_query:
-            print_master("Encoding queries...")
-            eval_qry_collator = MultimodalEvalDataCollator(processor, model_args, data_args, "qry")
-            eval_qry_loader = DataLoader(eval_qry_dataset, batch_size=training_args.per_device_eval_batch_size, collate_fn=eval_qry_collator, num_workers=training_args.dataloader_num_workers)
-            query_embeds, gt_infos = encode_embeddings(model, eval_qry_loader, training_args, model_args, padded_qry_dataset, encode_side="qry", description=f"Queries for {dataset_name}")
-            query_embeds = query_embeds[:len(full_eval_qry_dataset)]  # world_size>1, trim the padded data points
-            gt_infos = gt_infos[:len(full_eval_qry_dataset)]
-            if local_rank == 0:
-                with open(query_embed_path, 'wb') as f:
-                    pickle.dump(query_embeds, f)
-                with open(dataset_info_path, 'w') as f:
-                    for info in gt_infos:
-                        f.write(json.dumps(info) + '\n')
-                print_master(f"Saved query embeddings to {query_embed_path}")
+            if os.path.exists(os.path.join(encode_output_path, f"{dataset_name}_score.json")):
+                print_master(f"Skipping {dataset_name} as it has already been evaluated.")
+                continue
+
+            query_embed_path = os.path.join(encode_output_path, f"{dataset_name}_qry")
+            cand_embed_path = os.path.join(encode_output_path, f"{dataset_name}_tgt")
+            dataset_info_path = os.path.join(encode_output_path, f"{dataset_name}_info.jsonl")
+
+            do_query = not os.path.exists(query_embed_path) or not os.path.exists(dataset_info_path)
+            do_cand = not os.path.exists(cand_embed_path)
+
+            if do_query or do_cand:
+                if data_args.data_basedir is not None:
+                    # Construct full paths for data files if --data_basedir is provided
+                    for key in ["image_root", "video_root", "frame_root", "clip_root", "data_path"]:
+                        if data_args.data_basedir and task_config.get(key):
+                            task_config[key] = os.path.join(data_args.data_basedir, task_config[key])
+
+                full_eval_qry_dataset, full_eval_cand_dataset = AutoPairEvalDataset.instantiate(model_args=model_args, data_args=data_args, training_args=training_args, processor=processor, **task_config)
+
+                eval_qry_dataset, eval_cand_dataset = full_eval_qry_dataset, full_eval_cand_dataset
+                # Pad datasets to be divisible by world_size before splitting
+                if dist.is_initialized():
+                    padded_qry_dataset, _ = pad_dataset_to_divisible(full_eval_qry_dataset, world_size)
+                    padded_cand_dataset, _ = pad_dataset_to_divisible(full_eval_cand_dataset, world_size)
+                    eval_qry_dataset = split_dataset_by_node(padded_qry_dataset, rank=local_rank, world_size=world_size)
+                    eval_cand_dataset = split_dataset_by_node(padded_cand_dataset, rank=local_rank, world_size=world_size)
+                else:
+                    padded_qry_dataset, padded_cand_dataset = full_eval_qry_dataset, full_eval_cand_dataset
+
+            # --- 1. Compute Query Embeddings ---
+            if do_query:
+                print_master("Encoding queries...")
+                eval_qry_collator = MultimodalEvalDataCollator(processor, model_args, data_args, "qry")
+                eval_qry_loader = DataLoader(eval_qry_dataset, batch_size=training_args.per_device_eval_batch_size, collate_fn=eval_qry_collator, num_workers=training_args.dataloader_num_workers)
+                query_embeds, gt_infos = encode_embeddings(model, eval_qry_loader, training_args, model_args, padded_qry_dataset, encode_side="qry", description=f"Queries for {dataset_name}")
+                query_embeds = query_embeds[:len(full_eval_qry_dataset)]  # world_size>1, trim the padded data points
+                gt_infos = gt_infos[:len(full_eval_qry_dataset)]
+                if local_rank == 0:
+                    with open(query_embed_path, 'wb') as f:
+                        pickle.dump(query_embeds, f)
+                    with open(dataset_info_path, 'w') as f:
+                        for info in gt_infos:
+                            f.write(json.dumps(info) + '\n')
+                    print_master(f"Saved query embeddings to {query_embed_path}")
+                if dist.is_initialized():
+                    dist.barrier()
+
+
+            # --- 2. Compute Candidate Embeddings ---
+            if do_cand:
+                print_master("Encoding candidates...")
+                eval_cand_collator = MultimodalEvalDataCollator(processor, model_args, data_args, "cand")
+                eval_cand_loader = DataLoader(eval_cand_dataset, batch_size=training_args.per_device_eval_batch_size, collate_fn=eval_cand_collator, num_workers=training_args.dataloader_num_workers)
+
+                cand_embeds, all_cand_ids = encode_embeddings(model, eval_cand_loader, training_args, model_args, padded_cand_dataset, encode_side="cand", description=f"Candidates for {dataset_name}")
+                cand_embeds = cand_embeds[:len(full_eval_cand_dataset)]  # world_size>1, trim the padded data points
+                all_cand_ids = all_cand_ids[:len(full_eval_cand_dataset)]
+
+                if local_rank == 0:
+                    cand_embed_dict = {cand_id: embed for cand_id, embed in zip(all_cand_ids, cand_embeds)}
+                    with open(cand_embed_path, 'wb') as f: pickle.dump(cand_embed_dict, f)
+                    print_master(f"Saved candidate embeddings to {cand_embed_path}")
+
             if dist.is_initialized():
                 dist.barrier()
 
-
-        # --- 2. Compute Candidate Embeddings ---
-        if do_cand:
-            print_master("Encoding candidates...")
-            eval_cand_collator = MultimodalEvalDataCollator(processor, model_args, data_args, "cand")
-            eval_cand_loader = DataLoader(eval_cand_dataset, batch_size=training_args.per_device_eval_batch_size, collate_fn=eval_cand_collator, num_workers=training_args.dataloader_num_workers)
-
-            cand_embeds, all_cand_ids = encode_embeddings(model, eval_cand_loader, training_args, model_args, padded_cand_dataset, encode_side="cand", description=f"Candidates for {dataset_name}")
-            cand_embeds = cand_embeds[:len(full_eval_cand_dataset)]  # world_size>1, trim the padded data points
-            all_cand_ids = all_cand_ids[:len(full_eval_cand_dataset)]
-
+            # --- 3. Compute Scores (on master rank only) ---
             if local_rank == 0:
-                cand_embed_dict = {cand_id: embed for cand_id, embed in zip(all_cand_ids, cand_embeds)}
-                with open(cand_embed_path, 'wb') as f: pickle.dump(cand_embed_dict, f)
-                print_master(f"Saved candidate embeddings to {cand_embed_path}")
+                score_path = os.path.join(encode_output_path, f"{dataset_name}_score.json")
+                if os.path.exists(score_path):
+                    try:
+                        with open(score_path, "r") as f:
+                            score_dict = json.load(f)
+                        print_master(f"Score of {dataset_name} (loaded from previous run): {score_path}")
+                        formatted = {k: f"{v:.4f}" for k, v in score_dict.items()}
+                        print_master(formatted)
+                        continue
+                    except Exception as e:
+                        print_master(f"Failed to load score for {dataset_name}, skipping {dataset_name}")
+                with open(query_embed_path, 'rb') as f: qry_embeds = pickle.load(f)
+                with open(cand_embed_path, 'rb') as f: cand_embed_dict = pickle.load(f)
+                gt_infos = [json.loads(l) for l in open(dataset_info_path)]
+                pred_dicts = []
 
-        if dist.is_initialized():
-            dist.barrier()
-
-        # --- 3. Compute Scores (on master rank only) ---
-        if local_rank == 0:
-            score_path = os.path.join(encode_output_path, f"{dataset_name}_score.json")
-            if os.path.exists(score_path):
-                try:
-                    with open(score_path, "r") as f:
-                        score_dict = json.load(f)
-                    print_master(f"Score of {dataset_name} (loaded from previous run): {score_path}")
-                    formatted = {k: f"{v:.4f}" for k, v in score_dict.items()}
-                    print_master(formatted)
-                    continue
-                except Exception as e:
-                    print_master(f"Failed to load score for {dataset_name}, skipping {dataset_name}")
-            with open(query_embed_path, 'rb') as f: qry_embeds = pickle.load(f)
-            with open(cand_embed_path, 'rb') as f: cand_embed_dict = pickle.load(f)
-            gt_infos = [json.loads(l) for l in open(dataset_info_path)]
-            pred_dicts = []
-
-            rank_against_all_candidates = task_config.get("eval_type", "global") == "global"
-            if rank_against_all_candidates:
-                cand_keys = list(cand_embed_dict.keys())
-                cand_embeds = np.stack([cand_embed_dict[key] for key in cand_keys])
-                # Handle late-interaction scoring
-                if qry_embeds.ndim == 3: # Query: [N_q, L_q, H] | Candidate: [N_c, L_c, H]
-                    qry_embed = torch.from_numpy(qry_embeds)
-                    cand_embeds = [torch.from_numpy(np.array(t)) for t in cand_embeds]
-                    scores = processor.score(qry_embed, cand_embeds, batch_size=64)  # use ColPali score function
-                    ranked_candids = torch.argsort(-scores, dim=1).cpu().numpy().tolist()
-                else: # Dense
-                    cosine_scores = np.dot(qry_embeds, cand_embeds.T)
-                    ranked_candids = np.argsort(-cosine_scores, axis=1)
-                for qid, (ranked_candid, gt_info) in tqdm(enumerate(zip(ranked_candids, gt_infos)), desc=f"Calculating scores for {dataset_name}"):
-                    rel_docids = gt_info["label_name"] if isinstance(gt_info["label_name"], list) else [gt_info["label_name"]]
-                    rel_scores = gt_info["rel_scores"] if "rel_scores" in gt_info else None
-                    assert rel_scores is None or len(rel_docids) == len(rel_scores)
-                    pred_dicts.append({
-                        "prediction": [cand_keys[i] for i in ranked_candid],
-                        "label": rel_docids,
-                        "rel_scores": rel_scores,
-                    })
-            else:
-                for qid, (qry_embed, gt_info) in tqdm(enumerate(zip(qry_embeds, gt_infos)), desc=f"Calculating scores for {dataset_name}"):
-                    cand_embeds = np.stack([cand_embed_dict[key] for key in gt_info["cand_names"]])
+                rank_against_all_candidates = task_config.get("eval_type", "global") == "global"
+                if rank_against_all_candidates:
+                    cand_keys = list(cand_embed_dict.keys())
+                    cand_embeds = np.stack([cand_embed_dict[key] for key in cand_keys])
+                    # Handle late-interaction scoring
                     if qry_embeds.ndim == 3: # Query: [N_q, L_q, H] | Candidate: [N_c, L_c, H]
-                        qry_embed = torch.from_numpy(np.array(qry_embed)).unsqueeze(0)
+                        qry_embed = torch.from_numpy(qry_embeds)
                         cand_embeds = [torch.from_numpy(np.array(t)) for t in cand_embeds]
-                        scores = processor.score(qry_embed, cand_embeds, batch_size=1024)  # use ColPali score function
-                        ranked_candids = torch.argsort(-scores, dim=1).cpu().numpy().tolist()[0]
-                    else:
-                        cosine_score = np.dot(qry_embed, cand_embeds.T)
-                        ranked_candids = np.argsort(-cosine_score)
-                    rel_docids = gt_info["label_name"] if isinstance(gt_info["label_name"], list) else [gt_info["label_name"]]
-                    rel_scores = gt_info["rel_scores"] if "rel_scores" in gt_info else None
+                        scores = processor.score(qry_embed, cand_embeds, batch_size=64)  # use ColPali score function
+                        ranked_candids = torch.argsort(-scores, dim=1).cpu().numpy().tolist()
+                    else: # Dense
+                        cosine_scores = np.dot(qry_embeds, cand_embeds.T)
+                        ranked_candids = np.argsort(-cosine_scores, axis=1)
+                    for qid, (ranked_candid, gt_info) in tqdm(enumerate(zip(ranked_candids, gt_infos)), desc=f"Calculating scores for {dataset_name}"):
+                        rel_docids = gt_info["label_name"] if isinstance(gt_info["label_name"], list) else [gt_info["label_name"]]
+                        rel_scores = gt_info["rel_scores"] if "rel_scores" in gt_info else None
+                        assert rel_scores is None or len(rel_docids) == len(rel_scores)
+                        pred_dicts.append({
+                            "prediction": [cand_keys[i] for i in ranked_candid],
+                            "label": rel_docids,
+                            "rel_scores": rel_scores,
+                        })
+                else:
+                    for qid, (qry_embed, gt_info) in tqdm(enumerate(zip(qry_embeds, gt_infos)), desc=f"Calculating scores for {dataset_name}"):
+                        cand_embeds = np.stack([cand_embed_dict[key] for key in gt_info["cand_names"]])
+                        if qry_embeds.ndim == 3: # Query: [N_q, L_q, H] | Candidate: [N_c, L_c, H]
+                            qry_embed = torch.from_numpy(np.array(qry_embed)).unsqueeze(0)
+                            cand_embeds = [torch.from_numpy(np.array(t)) for t in cand_embeds]
+                            scores = processor.score(qry_embed, cand_embeds, batch_size=1024)  # use ColPali score function
+                            ranked_candids = torch.argsort(-scores, dim=1).cpu().numpy().tolist()[0]
+                        else:
+                            cosine_score = np.dot(qry_embed, cand_embeds.T)
+                            ranked_candids = np.argsort(-cosine_score)
+                        rel_docids = gt_info["label_name"] if isinstance(gt_info["label_name"], list) else [gt_info["label_name"]]
+                        rel_scores = gt_info["rel_scores"] if "rel_scores" in gt_info else None
 
-                    assert rel_scores is None or len(rel_docids) == len(rel_scores)
-                    pred_dicts.append({
-                        "prediction": [gt_info["cand_names"][i] for i in ranked_candids],
-                        "label": rel_docids,
-                        "rel_scores": rel_scores,
-                    })
+                        assert rel_scores is None or len(rel_docids) == len(rel_scores)
+                        pred_dicts.append({
+                            "prediction": [gt_info["cand_names"][i] for i in ranked_candids],
+                            "label": rel_docids,
+                            "rel_scores": rel_scores,
+                        })
 
-            score_path = os.path.join(encode_output_path, f"{dataset_name}_score.json")
-            pred_path = os.path.join(encode_output_path, f"{dataset_name}_pred.jsonl")
+                score_path = os.path.join(encode_output_path, f"{dataset_name}_score.json")
+                pred_path = os.path.join(encode_output_path, f"{dataset_name}_pred.jsonl")
 
-            metrics_to_report = task_config["metrics"] if task_config.get("metrics", None) is not None else ["hit", "ndcg", "precision", "recall", "f1", "map", "mrr"]
-            metrics = RankingMetrics(metrics_to_report)
-            score_dict = metrics.evaluate(pred_dicts)
-            formatted = {k: f"{v:.4f}" for k, v in score_dict.items()}
-            score_dict["num_pred"] = len(pred_dicts)
-            score_dict["num_data"] = len(gt_infos)
-            print_master(f"Score of {dataset_name}:")
-            print_master(formatted)
-            print_master(f"Outputting final score to: {score_path}")
-            with open(score_path, "w") as f:
-                json.dump(score_dict, f, indent=4)
-            with open(pred_path, "w") as f:
-                for pred in pred_dicts:
-                    f.write(json.dumps(pred) + '\n')
+                metrics_to_report = task_config["metrics"] if task_config.get("metrics", None) is not None else ["hit", "ndcg", "precision", "recall", "f1", "map", "mrr"]
+                metrics = RankingMetrics(metrics_to_report)
+                score_dict = metrics.evaluate(pred_dicts)
+                formatted = {k: f"{v:.4f}" for k, v in score_dict.items()}
+                score_dict["num_pred"] = len(pred_dicts)
+                score_dict["num_data"] = len(gt_infos)
+                print_master(f"Score of {dataset_name}:")
+                print_master(formatted)
+                print_master(f"Outputting final score to: {score_path}")
+                with open(score_path, "w") as f:
+                    json.dump(score_dict, f, indent=4)
+                with open(pred_path, "w") as f:
+                    for pred in pred_dicts:
+                        f.write(json.dumps(pred) + '\n')
 
-            # remove the encoded embeddings to save space
-            if os.path.exists(query_embed_path):
-                os.remove(query_embed_path)
-            if os.path.exists(cand_embed_path):
-                os.remove(cand_embed_path)
-
+                # remove the encoded embeddings to save space
+                if os.path.exists(query_embed_path):
+                    os.remove(query_embed_path)
+                if os.path.exists(cand_embed_path):
+                    os.remove(cand_embed_path)
+        except Exception as e:
+            print(e)
+            continue
 
 if __name__ == "__main__":
     main()
