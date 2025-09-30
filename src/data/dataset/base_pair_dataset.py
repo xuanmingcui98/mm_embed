@@ -15,6 +15,8 @@ from ..utils.dataset_utils import sample_dataset
 from ..utils.vision_utils import save_frames, load_frames, sample_frames
 from ...model.processor import process_input_text
 import torch
+import json
+import numpy as np
 
 DATASET_INSTRUCTION = {
     'Kinetics-700': 'Recognize the category of the video content.',
@@ -145,6 +147,7 @@ class BaseDatasetProcessor:
         self.image_dir = self.dataset_config.get('image_dir', None)
         self.model_backbone = self.model_args.model_backbone
         self.image_resolution = self.dataset_config.get('image_resolution', None)
+        self.clusters = self.dataset_config.get('cluster', None)
 
         self.query_key_text = query_key_text
         self.query_key_mm = query_key_mm
@@ -177,6 +180,20 @@ class BaseDatasetProcessor:
 
         self.dataset = self._load_hf_dataset()
         # self.add_signature_columns()
+        if self.clusters is not None:
+            all_clusters = []
+            if self.clusters.endswith('json'):
+                with open(self.clusters, 'r') as file:
+                    clusters = json.load(file)
+            elif self.clusters.endswith('jsonl'):
+                with open(self.clusters, 'r') as file:
+                    clusters = [json.loads(line) for line in file]
+            for c in clusters:
+                all_clusters.append(c['cluster'])
+            if len(all_clusters) < len(self.dataset):
+                all_clusters += [-1] * (len(self.dataset) - len(all_clusters))
+            cluster_idx = np.argsort(all_clusters)
+            self.dataset = self.dataset.select(cluster_idx)
 
         if self.data_args.debug_prompt:
             print_master(f"Debug mode enabled")
