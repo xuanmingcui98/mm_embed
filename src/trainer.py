@@ -229,7 +229,7 @@ class MMEBTrainer(Trainer):
             max_steps = args.max_steps
             # Setting a very large number of epochs so we go as many times as necessary over the iterator.
             num_train_epochs = sys.maxsize
-            num_update_steps_per_epoch = max_steps
+            num_update_steps_per_epoch = None
             num_examples = total_train_batch_size * args.max_steps
             num_train_samples = args.max_steps * total_train_batch_size
             if args.include_tokens_per_second:
@@ -355,15 +355,37 @@ class MMEBTrainer(Trainer):
             self.state = TrainerState.load_from_json(os.path.join(resume_from_checkpoint, TRAINER_STATE_NAME))
             self.compare_trainer_and_checkpoint_args(self.args, self.state)
             self._load_callback_state()
-            epochs_trained = int(self.state.global_step // num_update_steps_per_epoch)
-            if not args.ignore_data_skip:
-                steps_trained_in_current_epoch = self.state.global_step % (num_update_steps_per_epoch)
-                steps_trained_in_current_epoch *= args.gradient_accumulation_steps
+            # epochs_trained = int(self.state.global_step // num_update_steps_per_epoch)
+            # if not args.ignore_data_skip:
+            #     steps_trained_in_current_epoch = self.state.global_step % (num_update_steps_per_epoch)
+            #     steps_trained_in_current_epoch *= args.gradient_accumulation_steps
+            # else:
+            #     steps_trained_in_current_epoch = 0
+
+            # @xuanming modified #33544 begins: https://github.com/huggingface/transformers/pull/33544/commits/0181b10b4aafdd58b39615ecfaa509beeec060fc
+            if num_update_steps_per_epoch is not None:
+                epochs_trained = int(self.state.global_step // num_update_steps_per_epoch)
+                if not args.ignore_data_skip:
+                    steps_trained_in_current_epoch = self.state.global_step % (num_update_steps_per_epoch)
+                    steps_trained_in_current_epoch *= args.gradient_accumulation_steps
+                else:
+                    steps_trained_in_current_epoch = 0
             else:
-                steps_trained_in_current_epoch = 0
+                # If the dataloader does not have a length, we cannot restore the number of trained epochs.
+                # In the following loop, we repeatedly iterate over the dataloader to skip the first
+                # `steps_trained_in_current_epoch` steps and increment `epochs_trained` accordingly.
+                epochs_trained = 0
+                steps_trained_in_current_epoch = self.state.global_step * args.gradient_accumulation_steps
+                if args.ignore_data_skip:
+                    raise ValueError(
+                        "The dataloader does not have a length, so it is impossible to restore the number of trained"
+                        " epochs. Please disable the `ignore_data_skip` option."
+                    )
+            # @xuanming modified #33544 ends
 
             print_master("  Continuing training from checkpoint, will skip to saved global_step")
-            print_master(f"  Continuing training from epoch {epochs_trained}")
+            if num_update_steps_per_epoch is not None:
+                print_master(f"  Continuing training from epoch {epochs_trained}")
             print_master(f"  Continuing training from global step {self.state.global_step}")
             if not args.ignore_data_skip:
                 print_master(
@@ -402,6 +424,34 @@ class MMEBTrainer(Trainer):
                 # print(f'\t\tSetting new epoch={epoch}')
                 epoch_dataloader.dataset.set_epoch(epoch)
 
+            # @xuanming modified starts
+            steps_skipped = 0
+            rng_to_sync = False
+            epoch_iterator = None
+            if steps_trained_in_current_epoch > 0 and num_update_steps_per_epoch is None:
+                # Since the dataloader does not have a length, we just loop until the required number of steps.
+                # Every time we reach the end of the dataloader, we increment epoch and reset the iterator.
+                epoch_iterator = iter(epoch_dataloader)
+                epoch_over = False
+                while steps_trained_in_current_epoch > 0:
+                    try:
+                        # If the dataloader yields N batches and N is not divisible by `args.gradient_accumulation_steps`,
+                        # the update loop ignores the last `N % args.gradient_accumulation_steps` batches of an epoch.
+                        # To replicate the same behavior when resuming training, we ignore such batches from skipped epochs.
+                        for _ in range(args.gradient_accumulation_steps):
+                            next(epoch_iterator)
+                        steps_trained_in_current_epoch -= args.gradient_accumulation_steps
+                        steps_skipped += args.gradient_accumulation_steps
+                    except StopIteration:
+                        epoch_over = True
+                        break
+                if epoch_over:
+                    epochs_trained += 1
+                    continue
+                assert steps_trained_in_current_epoch == 0
+                rng_to_sync = True
+            # @xuanming modified ends
+
             # Reset the past mems state at the beginning of each epoch if necessary.
             if args.past_index >= 0:
                 self._past = None
@@ -425,7 +475,8 @@ class MMEBTrainer(Trainer):
                 rng_to_sync = True
 
             step = -1
-            epoch_iterator = iter(epoch_dataloader)
+            if epoch_iterator is None:
+                epoch_iterator = iter(epoch_dataloader)
             # We chunkify the epoch iterator into gradient accumulation steps `n` batches
             remainder = num_examples % args.gradient_accumulation_steps
             num_items_in_batch = None
@@ -810,7 +861,8 @@ class MMEBTrainer(Trainer):
         if self.control.should_save:
             self._save_checkpoint(model, trial)
             self.control = self.callback_handler.on_save(self.args, self.state, self.control)
-            
+
+
 class GradCacheLateProcessTrainer(MMEBTrainer):
     """
     Adapted from gradcache repo.

@@ -23,6 +23,7 @@ from .vatex_dataset import VatexEvalDatasetProcessor
 from .moment_retrieval_datasets import MomentRetrievalEvalDatasetProcessor 
 from .moment_retrieval_t2v_datasets import MomentRetrievalT2VEvalDatasetProcessor
 from .momentseeker_dataset import MomentSeekerEvalDatasetProcessor
+from .momentseeker_t2v_datasets import MomentSeekerT2VEvalDatasetProcessor
 
 # MMEB
 # from .image_cls_dataset import load_image_cls_dataset

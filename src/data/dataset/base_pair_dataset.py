@@ -158,6 +158,9 @@ class BaseDatasetProcessor:
         # if self.data_args.combine_image_datasets:
         #     n_workers_per_node = 8 * self.dataset_config['world_size'] * n_workers_per_node
 
+        if self.data_args.shuffle:
+            self.dataset = self.dataset.shuffle(seed=self.training_args.seed)
+
         if not self.data_args.debug_prompt:
             self.dataset = self.dataset.to_iterable_dataset(num_shards=8)
             setattr(self.dataset, 'num_rows', num_rows)
@@ -188,6 +191,15 @@ class BaseDatasetProcessor:
 
         dataset = load_dataset(self.dataset_name, self.dataset_config['subset_name'], split=f"{self.dataset_split}")
 
+        # # filter
+        # filtered = dataset.filter(
+        #     lambda row: (row["qry"] or row["qry_image_path"]) and 
+        #                 (row["pos_text"] or row["pos_image_path"])
+        # )
+
+        # print_master(f"Loading {self.subset_name} dataset. Original length: {len(dataset)}. After filter: {len(filtered)}. Filtered out {len(dataset) - len(filtered)} samples.")
+
+        # return filtered
         return dataset
 
 

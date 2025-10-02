@@ -6,7 +6,7 @@ from transformers.image_utils import ChannelDimension
 # from src.model.baseline_backbone.colpali import ColPaliProcessor
 
 logger = logging.getLogger(__name__)
-
+from PIL import Image
 import torch
 import numpy as np
 from src.utils import print_master
@@ -274,8 +274,16 @@ def process_fn(model_inputs: dict, processor, model_backbone=None, **kwargs):
 
     for text, visual in zip(texts, visual_inputs):
         if visual is None or (type(visual)==list and any(i is None for i in visual)):
-            # all images must be valid
-            pass
+            # add placeholder
+            if vlm_image_token in text:
+                # make a dummy 56x56 black image
+                placeholder = Image.fromarray(np.zeros((56, 56, 3), dtype=np.uint8))
+                image_inputs.append(placeholder)
+            elif vlm_video_token in text:
+                # make a dummy video: list of identical frames
+                frame = Image.fromarray(np.zeros((56, 56, 3), dtype=np.uint8))
+                placeholder = [frame, frame]  # at least 2 frames
+                video_inputs.append(placeholder)
         else:
 
             if vlm_image_token in text:
@@ -286,8 +294,6 @@ def process_fn(model_inputs: dict, processor, model_backbone=None, **kwargs):
             elif vlm_video_token in text:
                 assert isinstance(visual, list) and len(visual) > 1, f"Video data must have more than 1 frame, got {type(visual)} with length {len(visual) if isinstance(visual, list) else 'N/A'}"
                 video_inputs.append(visual)
-            else:
-                raise NotImplementedError(f"No visual token found ({vlm_image_token} or {vlm_video_token}) in the text: {text}")
 
     inputs = processor(text=texts,
                        images=image_inputs if image_inputs else None,
@@ -300,6 +306,7 @@ def process_fn(model_inputs: dict, processor, model_backbone=None, **kwargs):
 
 process_vlm_inputs_fns = {
     QWEN2_VL: Qwen2_VL_process_fn,
+    # QWEN2_VL: process_fn, 
     # QWEN2_5_VL: Qwen2_VL_process_fn,
     QWEN2_5_VL: process_fn,
     INTERNVL3: process_fn

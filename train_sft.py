@@ -254,7 +254,6 @@ def main():
         learning_rate=training_args.learning_rate,
         logging_steps=training_args.logging_steps,
         save_steps=training_args.save_steps,
-        save_total_limit=training_args.save_total_limit,
         bf16=True,
         max_grad_norm=max_grad_norm,
         warmup_ratio=warmup_ratio,

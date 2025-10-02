@@ -84,6 +84,10 @@ def main():
         train_dataset = init_mixed_dataset(dataset_config, model_args, data_args, training_args, processor)
 
     if 'qwen2_5_vl' in model_args.model_backbone:
+        setattr(training_args, "ddp_find_unused_parameters", False)
+        setattr(training_args, "gradient_checkpointing_kwargs", {"use_reentrant": False})
+        do_gradient_checkpointing = not (training_args.deepspeed and "zero3" in training_args.deepspeed)
+        setattr(training_args, "gradient_checkpointing", do_gradient_checkpointing)
         train_collator = ContrastiveDataCollator(processor)
     else:
         train_collator = MultimodalDataCollator(processor, model_args, data_args, training_args)

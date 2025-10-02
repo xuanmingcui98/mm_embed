@@ -197,7 +197,7 @@ def init_sft_dataset(dataset_config, model_args, data_args, training_args, proce
             if data_args.cache_dataset_dir:
                 train_dataset.save_to_disk(cached_dataset_path)
 
-        num_sample_per_subset = dataset_config.get("num_sample_per_subset")
+        num_sample_per_subset = dataset_config.get("num_sample_per_subset", 1e9)
         if train_dataset.num_rows >= num_sample_per_subset:
             train_dataset = train_dataset.shuffle(seed=training_args.seed).select(range(num_sample_per_subset))
         print_master(f"\t\tDataset#{data_idx} (dataset_parser={dataset_config.get('dataset_parser', 'n/a')}): {global_dataset_name}, num_rows={train_dataset.num_rows}")

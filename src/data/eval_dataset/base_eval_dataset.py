@@ -134,7 +134,7 @@ class BaseEvalDatasetProcessor:
         self.dataset_config['image_resolution'] = data_args.image_resolution
         self.apply_chat_template = data_args.apply_chat_template
         self.instruction = instruction
-
+        self.encode_side = self.dataset_config.get("encode_side", None)
         if self.data_args.debug_prompt:
             self.dataset_config['num_sample_per_subset'] = 1
 
@@ -351,7 +351,7 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
                     cand_texts.append(tgts)
             else:
 
-                if not (not qry_image_path.strip() and self.data_args.rewrites_for_mm_only):
+                if not (not qry_image_path.strip() and self.data_args.rewrites_for_mm_only) and (self.encode_side != 'target'):
                     query_description = self.query_descriptions[(qry_text, qry_image_path)] if self.query_descriptions is not None else None
 
                 qry_text = self.format_text_for_chat_template(True, 
@@ -362,7 +362,7 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
                 cand_text = []
                 for tgt_cap, tgt_img_path in zip(tgt_texts, tgt_image_paths):
                     if (tgt_cap, tgt_img_path) not in self.target_cache:
-                        if not (not tgt_img_path.strip() and self.data_args.rewrites_for_mm_only):
+                        if not (not tgt_img_path.strip() and self.data_args.rewrites_for_mm_only) and (self.encode_side != "query"):
                             target_description = self.target_descriptions[(tgt_cap, tgt_img_path)] if self.target_descriptions is not None else None
                         self.target_cache[(tgt_cap, tgt_img_path)] = self.format_text_for_chat_template(
                                                                         False, 
@@ -418,6 +418,11 @@ class MMEBV2EvalDatasetProcessor(BaseEvalDatasetProcessor):
                 one_sample['dataset_infos'], \
                 one_sample['query_description'], one_sample['target_description']
             
+            if self.encode_side == 'query':
+                target_description = None
+            elif self.encode_side == 'target':
+                query_description = None
+
             query_descriptions.append(query_description)
             target_descriptions.append(target_description)
 

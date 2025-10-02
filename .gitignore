@@ -109,3 +109,7 @@ tmp.py
 results/
 *.ttf
 *.ipynb
+*.avi
+generate_descriptions_v2_qwen.py
+generate_descriptions_v2_qwen_gt.py
+save_frames_from_videos.py

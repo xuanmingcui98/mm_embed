@@ -103,7 +103,7 @@ def main():
     # if "32b" in model_args.model_name.lower():
     setattr(training_args, "ddp_find_unused_parameters", False)
     setattr(training_args, "gradient_checkpointing_kwargs", {"use_reentrant": False})
-    do_gradient_checkpointing = training_args.deepspeed and "zero3" not in training_args.deepspeed
+    do_gradient_checkpointing = not (training_args.deepspeed and "zero3" in training_args.deepspeed)
     setattr(training_args, "gradient_checkpointing", do_gradient_checkpointing)
 
     trainer = trainer_cls(

@@ -13,17 +13,15 @@ from ..prompts import (VIDEO_EMBED_INSTRUCTION,
                        TEXT_EMBED_INSTRUCTION)
 from ..loader.mixed_dataset import AutoPairEvalDataset
 
-TASK_INST_QRY_TEXT = "Find the clip that corresponds to the given text:"
-TASK_INST_QRY_IMG = "Select the video clip that aligns with the given text and image:"
-TASK_INST_QRY_VIDEO =  "Find the clip that corresponds to the given sentence and video segment:"
+TASK_INST_QRY =  "Find the clip that corresponds to the described scene in the given video:"
 TASK_INST_TGT =  "Understand the content of the provided video clip."
 
-DATASET_PARSER_NAME = "momentseeker"
+DATASET_PARSER_NAME = "momentseeker_t2v"
 @AutoPairEvalDataset.register(DATASET_PARSER_NAME)
 @AutoPairEvalDataset.register_instruction("MomentSeeker",
     {'query': {"video": VIDEO_TEXT_EMBED_INSTRUCTION, "image": IMAGE_TEXT_EMBED_INSTRUCTION, "text": TEXT_EMBED_INSTRUCTION},
      'target': VIDEO_EMBED_INSTRUCTION})
-class MomentSeekerEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
+class MomentSeekerT2VEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
     def __init__(self, *args,**dataset_config):
 
         super().__init__(DATASET_PARSER_NAME, *args, **dataset_config)
@@ -61,68 +59,21 @@ class MomentSeekerEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
 
 
         query_description = None
-        # --- Build query text/image depending on input modality ---
-        if isinstance(input_frames, str) and input_frames.endswith(".mp4"):
-
-            # if self.data_args.apply_chat_template:
-            #     query_text = self.instruction['query']['video'].format(text=query)
-            # else:
-            query_text = process_input_text(TASK_INST_QRY_VIDEO, model_backbone, text=query, add_video_token=True)
-
-            # Frames dir for this query video
-            query_video_name = input_frames.split(".mp4")[0].replace("/", "_")
-            query_frame_dir  = os.path.join(frame_root, "video_frames", query_video_name)
-
-            if self.query_descriptions is not None:
+        query_text = process_input_text(TASK_INST_QRY, model_backbone, text=query, add_video_token=True)
+        if self.query_descriptions is not None:
+            # --- Build query text/image depending on input modality ---
+            if isinstance(input_frames, str) and input_frames.endswith(".mp4"):
                 query_description = self.query_descriptions.get((query, input_frames))
-                if not query_description:
-                    print(f'No query description found for ({query}, {input_frames}) for dataset {self.dataset_config["dataset_name"]}')
-            # Extract frames if needed, then load
-            if not os.path.exists(query_frame_dir):
-                query_video_path = os.path.join(video_root, input_frames)
-                save_frames(video_path=query_video_path,
-                            frame_dir=query_frame_dir,
-                            max_frames_saved=num_video_frames)
-            qry_frame_paths = load_frames(query_frame_dir)
 
-            query_image = {
-                "bytes": [None] * len(qry_frame_paths),
-                "paths": qry_frame_paths,
-                "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)] * len(qry_frame_paths),
-            }
-
-        elif isinstance(input_frames, str) and input_frames.endswith(".jpg"):
-            # Text: image query
-
-            # if self.data_args.apply_chat_template:
-            #     query_text = self.instruction['query']['image'].format(text=query)
-            # else:
-            query_text = process_input_text(TASK_INST_QRY_IMG, model_backbone, text=query, add_image_token=True)
-
-            # Use the provided single image (stored under frame_root as "query_<fname>")
-            input_image_path = os.path.join(frame_root, f"query_{input_frames}")
-            if self.query_descriptions is not None:
+            elif isinstance(input_frames, str) and input_frames.endswith(".jpg"):
                 query_description = self.query_descriptions.get((query, input_frames,))
-                if not query_description:
-                    print(f'No query description found for ({query}, {input_frames}) for dataset {self.dataset_config["dataset_name"]}')
-            query_image = {
-                "bytes": [None],
-                "paths": [input_image_path],
-                "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)],
-            }
 
-        else:
-            # Pure text query
-
-            # if self.data_args.apply_chat_template:
-            #     query_text = self.instruction['query']['text'].format(text=query)
-            # else:
-            query_text = process_input_text(TASK_INST_QRY_TEXT, model_backbone, text=query, add_video_token=True)
-            if self.query_descriptions is not None:
+            else:
+                # Pure text query
                 query_description = self.query_descriptions.get((query,))
-                if not query_description:
-                    print(f'No query description found for ({query},) for dataset {self.dataset_config["dataset_name"]}')
-            query_image = None
+
+        if not query_description:
+            print(f'No query description found for ({query}, {input_frames}) for dataset {self.dataset_config["dataset_name"]}')
 
         # --- Build candidate clips (positives + negatives) ---
         pos_clip_paths = [entry["output_path"] for entry in positive_frames]
@@ -174,7 +125,7 @@ class MomentSeekerEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
 
         return {
             "query_text": query_text,
-            "query_image": query_image,
+            "query_image": None,
             "cand_text": cand_text,
             "cand_image": cand_image,
             "dataset_infos": dataset_infos,
