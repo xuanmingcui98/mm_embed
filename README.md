@@ -36,6 +36,10 @@ To launch multinode training on slurm, please refer to `scripts/train_full.sh`, 
 
 For evaluation, for local evaluation, please refer to eval.py. For multi-gpu eval, please refer to `scripts/eval_v1.sh`, and provide corresponding checkpoint_path.
 
+Checkpoints: [google drive](https://drive.google.com/drive/folders/1qPzMIEtTQufo0F8mEdX6Z6ViyjgUVZIF?dmr=1&ec=wgc-drive-globalnav-goto)
+ECRs: [google drive](https://drive.google.com/drive/folders/1TlPSwth76yu_tE_QqxMrarDBayx-R__h?dmr=1&ec=wgc-drive-globalnav-goto)
+
+
 
 
 
