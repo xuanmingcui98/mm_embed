@@ -3,8 +3,9 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 from functools import partial
 from datasets import Features, Value, Sequence
+import random
 import pickle, os
-from datasets import load_dataset, concatenate_datasets
+from datasets import load_dataset, concatenate_datasets, load_from_disk
 from ...model.processor import PHI3V, VLM_IMAGE_TOKENS, VLM_VIDEO_TOKENS
 from ...utils import print_master, print_rank
 from ..prompts import (format_description,
@@ -20,8 +21,11 @@ from ..loader.mixed_dataset import add_metainfo_hook
 import torch
 import json
 import numpy as np
+import copy
+from ...utils import tqdm0
 
 DATASET_INSTRUCTION = {
+
     'Kinetics-700': 'Recognize the category of the video content.',
     'SmthSmthV2': 'What actions or object interactions are being performed by the person in the video?',
     'UCF101': 'What activities or sports are being performed by the person in the video?',
@@ -53,14 +57,18 @@ MULTIMODAL_FEATURES = Features(**{
         "bytes": Sequence(Value(dtype='binary')),
         "resolutions": Sequence(Sequence(Value(dtype='int32'), length=2))
     },
-    "neg_text": Value(dtype='string'),
-    "neg_image": {
+    "neg_text": Sequence(Value(dtype='string')),
+    "neg_image": Sequence({
         "paths": Sequence(Value(dtype='string')),
         "bytes": Sequence(Value(dtype='binary')),
         "resolutions": Sequence(Sequence(Value(dtype='int32'), length=2))
-    },
+    }),
     "global_dataset_name": Value(dtype='string'),
-    "task_id": Value(dtype='int32')  # Task ID for the dataset
+    "task_id": Value(dtype='int32'),  # Task ID for the dataset
+    "index_id": Value(dtype="int32"),
+    "query_ecr": Value(dtype="string"),
+    "pos_ecr": Value(dtype="string"),
+    # "neg_scores": Sequence(Value(dtype="float"))
 })
 
 RESOLUTION_MAPPING = {
@@ -119,8 +127,71 @@ class BaseDatasetProcessor:
         self.dataset_config['model_backbone'] = self.model_args.model_backbone
 
         self.dataset = self._load_hf_dataset()
+        self.dataset = self.dataset.add_column("index_id", list(range(len(self.dataset))))
+
+        
+
+        if self.data_args.hard_negative_dir:
+            self.non_iter_dataset = copy.deepcopy(self.dataset)
+            
+            # self.dataset = self.dataset.select(list(range(2048)))
+            cache_location = f"cache_dir/{self.subset_name}_{self.data_args.hard_negative_filter_strategy}_{self.data_args.hard_negatives_per_sample}_threshold{self.data_args.hard_negative_filter_threshold}"
+            if os.path.exists(cache_location):
+                self.dataset = load_from_disk(cache_location)
+            else:
+                hard_negatives_dict = pickle.load(open(os.path.join(self.data_args.hard_negative_dir, f"{self.subset_name}.pkl"), "rb"))
+
+                global MULTIMODAL_FEATURES
+                MULTIMODAL_FEATURES["hard_negatives"] = Sequence(Value("int32"))
+
+                print_master("==> Loading hard negatives")
+                hard_negatives = []
+                has_sufficient_hn = []
+                for row in tqdm0(self.dataset):
+                    anno = hard_negatives_dict.get(row['index_id'])
+                    if not anno:
+                        has_sufficient_hn.append(False)
+                        hard_negatives.append([]) # dummy
+                        continue
+
+                    scores, candidate_ids, gt_id = \
+                        anno['scores'], anno['candidate_ids'], anno['ground_truth_id']
+                    if self.data_args.hard_negative_filter_strategy == "random":
+                        no_gt = [x for x in candidate_ids if x != gt_id]
+                        if len(no_gt) < self.data_args.hard_negatives_per_sample:
+                            hard_negative = [] # dummy
+                        else:
+                            hard_negative = random.sample(no_gt, self.data_args.hard_negatives_per_sample)
+                    else:
+                        gt_score = scores[candidate_ids.index(gt_id)]
+                        if self.data_args.hard_negative_filter_strategy == "pp":
+                            threshold = self.data_args.hard_negative_filter_threshold * gt_score
+                            zipped = list(zip(scores, candidate_ids))
+                            zipped = sorted(zipped, lambda x: -x[0])
+                            filtered = [x for x in zipped if x[0] < threshold]
+                            hard_negative = filtered[:self.data_args.hard_negatives_per_sample]
+                        else:
+                            raise NotImplementedError()
+                    
+                    has_sufficient_hn.append(len(hard_negative) == self.data_args.hard_negatives_per_sample)
+                    hard_negatives.append(hard_negative)
+                self.dataset = self.dataset.add_column("hard_negatives", hard_negatives)
+                indices = np.where(has_sufficient_hn)[0].tolist()
+                self.dataset = self.dataset.select(indices)
+                print_master(f"Filtered out {len(has_sufficient_hn) - sum(has_sufficient_hn)} rows due to insufficinet Hard Negative samples.")
+                self.dataset.save_to_disk(cache_location)
+
+
         # self.add_signature_columns()
-        self.clusters = os.path.join(data_args.cluster_path, f"{self.subset_name}_clusters.json")
+        if self.subset_name == "video_qa_240k":
+            cluster_filename = "video_240k_caption_15k_clusters.jsonl"
+        elif self.subset_name in  {"video_caption_300k-v2t", "video_caption_300k-t2v"}:
+            cluster_filename = "video_caption_300k_clusters.jsonl"
+        elif self.subset_name == "VisRAG-Indomain-data":
+            cluster_filename = "VisRAG-Ret-Train-In-domain-data_clusters.json"
+        else:
+            cluster_filename = f"{self.subset_name}_clusters.json"
+        self.clusters = os.path.join(data_args.cluster_path, cluster_filename)
         if os.path.exists(self.clusters):
             all_clusters = []
             if self.clusters.endswith('json'):
@@ -133,12 +204,16 @@ class BaseDatasetProcessor:
                 all_clusters.append(c['cluster'])
             if len(all_clusters) < len(self.dataset):
                 all_clusters += [-1] * (len(self.dataset) - len(all_clusters))
+            
+            self.dataset = self.dataset.add_column("cluster", all_clusters)
             cluster_idx = np.argsort(all_clusters)
             self.dataset = self.dataset.select(cluster_idx)
 
+            MULTIMODAL_FEATURES["cluster"] = Value(dtype='int32')
+
         if self.data_args.debug_prompt:
             print_master(f"Debug mode enabled")
-            self.dataset = self.dataset.select(range(1)) 
+            # self.dataset = self.dataset.select(range(1024)) 
 
         self.column_names = self.dataset.column_names
         self.dataset = sample_dataset(self.dataset, **dataset_config)
@@ -153,7 +228,6 @@ class BaseDatasetProcessor:
             if col_name not in MULTIMODAL_FEATURES:
                 columns_to_remove.append(col_name)
 
-        num_rows = self.dataset.num_rows
         n_workers_per_node = self.training_args.dataloader_num_workers if self.training_args.dataloader_num_workers > 0 else 1
         # if self.data_args.combine_image_datasets:
         #     n_workers_per_node = 8 * self.dataset_config['world_size'] * n_workers_per_node
@@ -171,7 +245,7 @@ class BaseDatasetProcessor:
                             batched=True, 
                             batch_size=64,
                             remove_columns=columns_to_remove,
-                            drop_last_batch=not self.data_args.debug_prompt # temp
+                            drop_last_batch=False #not self.data_args.debug_prompt # temp
                             )
 
         self.dataset = self.dataset.cast(MULTIMODAL_FEATURES)
@@ -271,49 +345,78 @@ class BaseDatasetProcessor:
 
         batch_size = len(batch_dict['qry'])
         query_texts, query_images, pos_texts, pos_images, neg_texts, neg_images = [], [], [], [], [], []
-        for qry_text, qry_image_path, pos_text, pos_image_path, neg_text, neg_image_path in \
-            zip(batch_dict['qry'], batch_dict['qry_image_path'],
-                batch_dict['pos_text'], batch_dict['pos_image_path'],
-                batch_dict.get('neg_text', [''] * batch_size), batch_dict.get('neg_image_path', [None] * batch_size)):
+        query_ecrs, pos_ecrs = [], []
+        neg_scores = []
+        for idx, (qry_text, qry_image_path, pos_text, pos_image_path) in \
+            enumerate(zip(batch_dict['qry'], batch_dict['qry_image_path'],
+                batch_dict['pos_text'], batch_dict['pos_image_path'])):
             if (not qry_text and not qry_image_path) or (not pos_text and not pos_image_path):
                 print(f"empty inputs from {self.subset_name}")
                 continue
 
-            if data_args.apply_chat_template:
-                query_description = pos_description = None
-                if self.query_descriptions:
-                    query_description = self.query_descriptions[(qry_text, qry_image_path)]
-                if self.target_descriptions:
-                    pos_description = self.target_descriptions[(pos_text, pos_image_path)]
+            hard_negative_texts = [''] * self.data_args.hard_negatives_per_sample
+            hard_negative_images = [''] * self.data_args.hard_negatives_per_sample
+            hard_negative_description = [''] * self.data_args.hard_negatives_per_sample
 
-                if (not qry_image_path and self.data_args.rewrites_for_mm_only): # or self.encode_side == 'target':
-                    query_description = None
-                if (not pos_image_path and self.data_args.rewrites_for_mm_only): # or self.encode_side == 'query':
-                    pos_description = None
+            if self.data_args.hard_negative_dir:
+                hard_negative_samples = batch_dict['hard_negatives'][idx]
+                hard_negative_samples = [self.non_iter_dataset[i] for i in hard_negative_samples]
+                hard_negative_texts = [x['pos_text'] for x in hard_negative_samples]
+                hard_negative_images = [x['pos_image_path'] for x in hard_negative_samples]
+                
+
+            query_description = pos_description = None
+            if self.query_descriptions:
+                query_description = self.query_descriptions[(qry_text, qry_image_path)]
+
+            if self.target_descriptions:
+                pos_description = self.target_descriptions[(pos_text, pos_image_path)]
+                if self.data_args.hard_negative_dir:
+                    hard_negative_description = [self.target_descriptions[(t, i)] for t,i in zip(hard_negative_texts, hard_negative_images)]
+
+            # if (not qry_image_path and self.data_args.rewrites_for_mm_only) or self.encode_side == 'target':
+            #     query_description = None
+            # if (not pos_image_path and self.data_args.rewrites_for_mm_only) or self.encode_side == 'query':
+            #     pos_description = None
+            #     hard_negative_description = [None] * len(hard_negative_description)
+
+            if data_args.apply_chat_template:
                 qry_text = self.format_text_for_chat_template(is_query=True, text=qry_text, image_path=qry_image_path, add_generation_prompt=False, description=query_description)
                 pos_text = self.format_text_for_chat_template(is_query=False, text=pos_text, image_path=pos_image_path, add_generation_prompt=False, description=pos_description)
+                if self.data_args.hard_negative_dir:
+                    hard_negative_texts = [self.format_text_for_chat_template(is_query=False, text=t, image_path=i, add_generation_prompt=False, description=d) \
+                                            for t,i,d in zip(hard_negative_texts, hard_negative_images, hard_negative_description)]
+                    if len(hard_negative_texts) != self.data_args.hard_negatives_per_sample:
+                        raise ValueError(f"Insufficient hn ({len(hard_negative_texts)}) for {self.subset_name}")
             else:
                 if self.model_backbone != PHI3V:
                     qry_text = qry_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[self.model_backbone])
                     pos_text = pos_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[self.model_backbone])
-                    neg_text = neg_text.replace(VLM_IMAGE_TOKENS[PHI3V], VLM_IMAGE_TOKENS[self.model_backbone]) if neg_text else ''
 
             query_texts.append(qry_text)
             pos_texts.append(pos_text)
-            neg_texts.append(neg_text)
+            neg_texts.append(hard_negative_texts)
             # 20240227 defer image loading and transforming to data-loader to avoid repeatedly Serialization/Deserialization of PIL Images
+
+            if self.data_args.fast_iter_with_no_visual:
+                qry_image_path = pos_image_path = None
+                
             qry_image = {"bytes": [None], "paths": [os.path.join(self.image_dir, qry_image_path) if qry_image_path else None], "resolutions": [RESOLUTION_MAPPING.get(self.image_resolution, None)]}
             pos_image = {"bytes": [None], "paths": [os.path.join(self.image_dir, pos_image_path) if pos_image_path else None], "resolutions": [RESOLUTION_MAPPING.get(self.image_resolution, None)]}
-            neg_image = {"bytes": [None], "paths": [os.path.join(self.image_dir, neg_image_path) if neg_image_path else None], "resolutions": [RESOLUTION_MAPPING.get(self.image_resolution, None)]}
+            neg_image = [{"bytes": [None], "paths": [os.path.join(self.image_dir, image_path) if image_path else None], "resolutions": [RESOLUTION_MAPPING.get(self.image_resolution, None)]} for image_path in hard_negative_images]
             query_images.append(qry_image)
             pos_images.append(pos_image)
             neg_images.append(neg_image)
+
+            query_ecrs.append(query_description)
+            pos_ecrs.append(pos_description)
         if len(query_texts) == 0:
             print('something went wrong')
         # print_rank(f"global_dataset_name={kwargs.get('global_dataset_name', DATASET_PARSER_NAME)}, batch_size={batch_size}, processed_batch_size={len(query_texts)}")
         return {"query_text": query_texts, "query_image": query_images,
                 "pos_text": pos_texts, "pos_image": pos_images,
-                "neg_text": neg_texts, "neg_image": neg_images}
+                "neg_text": neg_texts, "neg_image": neg_images,
+                "query_ecr": query_ecrs, "pos_ecr": pos_ecrs}
 
     @add_metainfo_hook
     def single_preprocess(self, sample, data_args, model_args, processor, *args, **kwargs):
@@ -368,15 +471,24 @@ class VideoDatasetProcessor(BaseDatasetProcessor):
     def batch_preprocess(self, batch_dict, *args, **kwargs):
 
         query_texts, query_images, pos_texts, pos_images, neg_texts, neg_images = [], [], [], [], [], []
+        query_ecrs, pos_ecrs = [], []
         batch_size = len(next(iter(batch_dict.values())))
 
         for data_idx in range(batch_size):
             one_sample = self._process_one_sample(data_idx, batch_dict, *args, **kwargs)
-            query_text, query_image, pos_text, pos_image, neg_text, neg_image, query_description, target_description  = \
+            query_text, query_image, pos_text, pos_image, neg_text, neg_image, query_description, target_description, neg_description  = \
                 one_sample['query_text'], one_sample['query_image'], \
                 one_sample['pos_text'], one_sample['pos_image'], \
                 one_sample['neg_text'], one_sample['neg_image'], \
-                one_sample['query_description'], one_sample['target_description']
+                one_sample['query_description'], one_sample['target_description'], \
+                one_sample['neg_description']
+
+            if (not query_image and self.data_args.rewrites_for_mm_only): # or self.encode_side == 'target':
+                query_description = None
+            if (not pos_image and self.data_args.rewrites_for_mm_only): # or self.encode_side == 'query':
+                target_description = None
+                neg_description = [None] * len(neg_description)
+
 
             if self.data_args.apply_chat_template:
 
@@ -394,16 +506,28 @@ class VideoDatasetProcessor(BaseDatasetProcessor):
                     else:
                         pos_image_input = pos_image['paths'][0] or pos_image['bytes'][0]
                 
-                if (not query_image and self.data_args.rewrites_for_mm_only): # or self.encode_side == 'target':
-                    query_description = None
-                if (not pos_image and self.data_args.rewrites_for_mm_only): # or self.encode_side == 'query':
-                    target_description = None
                 query_text = self.format_text_for_chat_template(
                     is_query=True, text=query_text, image_path=query_image_input, video_path=query_video_input, 
                     description=query_description)
                 pos_text = self.format_text_for_chat_template(
                     is_query=False, text=pos_text, image_path=pos_image_input, video_path=pos_video_input, 
                     description=target_description)
+                
+                if self.data_args.hard_negative_dir and neg_description:
+                    formatted_neg_text = []
+                    for text,image,description in zip(neg_text, neg_image, neg_description):
+                        neg_image_input = neg_video_input = None
+                        if image:
+                            if len(image['paths']) > 1:
+                                neg_video_input = image['paths'][0] or image['bytes'][0]
+                            else:
+                                neg_image_input = image['paths'][0] or image['bytes'][0]
+                        formatted_neg_text.append(self.format_text_for_chat_template(
+                            is_query=False, text=text, image_path=neg_image_input, video_path=neg_video_input, 
+                            description=description))
+                    neg_text = formatted_neg_text
+                    if len(neg_text) != self.data_args.hard_negatives_per_sample:
+                        raise ValueError(f"Insufficient hn ({len(neg_text)}) for {self.subset_name}")
 
             query_texts.append(query_text)
             query_images.append(query_image)
@@ -412,9 +536,13 @@ class VideoDatasetProcessor(BaseDatasetProcessor):
             neg_texts.append(neg_text)
             neg_images.append(neg_image)
 
+            query_ecrs.append(query_description)
+            pos_ecrs.append(target_description)
+
         return {"query_text": query_texts, "query_image": query_images,
                 "pos_text": pos_texts, "pos_image": pos_images,
-                "neg_text": neg_texts, "neg_image": neg_images,}
+                "neg_text": neg_texts, "neg_image": neg_images,
+                "query_ecr": query_ecrs, "pos_ecr": pos_ecrs}
 
 
     def format_text_for_chat_template(self, is_query, text, image_path=None, video_path=None, description=None, add_generation_prompt=False):

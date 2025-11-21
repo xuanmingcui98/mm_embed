@@ -10,7 +10,7 @@ from transformers import (
     set_seed
 )
 from trl import SFTConfig, SFTTrainer
-from trl.trainer.sft_trainer import DataCollatorForVisionLanguageModeling, prepare_multimodal_messages
+from trl.trainer.sft_trainer import DataCollatorForVisionLanguageModeling
 from peft import LoraConfig
 from tqdm import tqdm
 from PIL import Image
@@ -100,6 +100,23 @@ def train_transform(batch):
 
     return {"images": images, "videos": videos, "messages": messages}
 
+def prepare_multimodal_messages(messages: list[dict[str, Any]], num_images: int, num_videos: int) -> None:
+
+    for message in messages:
+        if message["role"] == "system":
+            if isinstance(message["content"], str):  # if already prepared, the content will be a list
+                message["content"] = [{"type": "text", "text": message["content"]}]
+        elif message["role"] == "user":
+
+            placeholders = [{"type": "image"}] * num_images + [{"type": "video"}] * num_videos
+            message["content"] = [*placeholders, {"type": "text", "text": message["content"]}]
+
+        elif message["role"] == "assistant":
+            if isinstance(message["content"], str):
+                message["content"] = [{"type": "text", "text": message["content"]}]
+        else:
+            raise ValueError(f"Invalid role in message: {message['role']}. Expected 'user', 'assistant', or 'system'.")
+
 @dataclass
 class MultimodalCollator(DataCollatorForVisionLanguageModeling):
 
@@ -115,7 +132,7 @@ class MultimodalCollator(DataCollatorForVisionLanguageModeling):
 
         if "messages" in examples[0]:  # conversational case
             for example in examples:
-                prepare_multimodal_messages(example["messages"], len(example["images"]))
+                prepare_multimodal_messages(example["messages"], len(example["images"]), len(example["videos"]))
             messages = [example["messages"] for example in examples]
             texts = self.processor.apply_chat_template(messages)
         elif self.dataset_text_field in examples[0]:  # standard case

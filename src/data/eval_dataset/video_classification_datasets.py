@@ -103,6 +103,7 @@ class VideoClassificationEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             if query_description is None:
                 print(f"No query description for video {video_id} in {self.dataset_config['dataset_name']} dataset")
 
+        dataset_infos["query_id"] = (video_id,)
         return {
             "query_text": query_text,   # str
             "query_image": query_image, # dict or None

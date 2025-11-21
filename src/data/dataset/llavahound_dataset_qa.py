@@ -35,11 +35,18 @@ class LLaVaHoundQADatasetProcessor(VideoDatasetProcessor):
         frame_basedir = kwargs['video_frame_basedir']
         num_frames = kwargs['num_frames']
 
+        neg_text = [""]
+        neg_image = [None]
+        neg_description = [""]
+
         try:
             data_idx, data_id, conversations, video_id = idx, batch_dict['id'][idx], batch_dict['conversations'][idx], batch_dict['video'][idx]
             query, pos_text = process_conversations(conversations, video_token=VLM_VIDEO_TOKENS[model_backbone], prompt=QA_QUERY_PROMPT)
-            frame_paths = process_video_frames(os.path.join(frame_basedir, video_id), num_frames=num_frames)
-            video_frames = {"bytes": [None] * num_frames, "paths": frame_paths, "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)] * num_frames}
+            if not self.data_args.fast_iter_with_no_visual:
+                frame_paths = process_video_frames(os.path.join(frame_basedir, video_id), num_frames=num_frames)
+                video_frames = {"bytes": [None] * num_frames, "paths": frame_paths, "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)] * num_frames}
+            else:
+                video_frames = None
 
             query_description = None
             if self.query_descriptions is not None:
@@ -47,9 +54,18 @@ class LLaVaHoundQADatasetProcessor(VideoDatasetProcessor):
                 # if not query_description:
                     # print(f"No target description for video {data_id} in {self.dataset_config['dataset_name']} dataset")
 
+            if self.data_args.hard_negative_dir:
+                hard_negative_samples = batch_dict['hard_negatives'][idx]
+                hard_negative_samples = [self.non_iter_dataset[i] for i in hard_negative_samples]
+                neg_text = [process_conversations(x['conversations'], video_token=VLM_VIDEO_TOKENS[model_backbone], prompt=QA_QUERY_PROMPT)[1] for x in hard_negative_samples]
+                neg_image = [None] * len(hard_negative_samples)
+                neg_description= [""] * len(hard_negative_samples)
+                
+
             return {"query_text": query, "query_image": video_frames,
                     "pos_text": pos_text, "pos_image": None,
-                    "neg_text": "", "neg_image": None,
+                    "neg_text": neg_text, "neg_image": neg_image,
+                    "neg_description": neg_description,
                     "query_description": query_description,
                     "target_description": None}
         except Exception as e:

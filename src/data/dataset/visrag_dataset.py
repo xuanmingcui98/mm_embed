@@ -1,4 +1,4 @@
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 from PIL import Image
 from datasets.features.image import image_to_bytes
 from torch.jit import isinstance
@@ -55,7 +55,9 @@ class VisragDatasetProcessor(VideoDatasetProcessor):
         dataset_path = self.dataset_config.get("dataset_path", None)
 
         if dataset_name:
-            dataset = load_dataset("openbmb/VisRAG-Ret-Train-In-domain-data", split=dataset_split)
+            # dataset = load_dataset("/home/xuanmingcui/.cache/huggingface/datasets/openbmb___vis_rag-ret-train-in-domain-data/default/0.0.0/9c2ecd955e15151b57c6e4ae7a7bb13dc5ad09d2", split=dataset_split)
+            # dataset = load_dataset("openbmb/VisRAG-Ret-Train-In-domain-data", split=dataset_split)
+            dataset = load_from_disk("/home/xuanmingcui/datasets/visrag_train_in_domain_data")
         elif dataset_path:
             dataset = load_dataset("parquet", data_files=dataset_path, split="train")
         
@@ -66,21 +68,27 @@ class VisragDatasetProcessor(VideoDatasetProcessor):
         model_backbone = kwargs['model_backbone']
         image_resolution = kwargs['image_resolution']
 
+        neg_text = [""]
+        neg_image = [None]
+        neg_description = [""]
+
         query, image, source = batch_dict['query'][idx], batch_dict['image'][idx], batch_dict['source'][idx]
         query = process_query(query, prompt=query_source2prompt.get(source, ""), image_token="")
         pos_text = process_query('', prompt=target_source2prompt.get(source, ""), image_token=VLM_IMAGE_TOKENS[model_backbone])
         # query = process_query(query, prompt="", image_token="")
         # pos_text = process_query('', prompt="", image_token=VLM_IMAGE_TOKENS[model_backbone])
-
-        if isinstance(image, Image.Image):
-            # BC, datasets==2.21.0
-            image_bytes = image_to_bytes(image)
-            path = ""
-        elif type(image) is dict:
-            # datasets==3.3.2
-            image_bytes = image['bytes']
-            path = image['path']
-        pos_image = {"bytes": [image_bytes], "paths": [path], "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]}
+        if not self.data_args.fast_iter_with_no_visual:
+            if isinstance(image, Image.Image):
+                # BC, datasets==2.21.0
+                image_bytes = image_to_bytes(image)
+                path = ""
+            elif type(image) is dict:
+                # datasets==3.3.2
+                image_bytes = image['bytes']
+                path = image['path']
+            pos_image = {"bytes": [image_bytes], "paths": [path], "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]}
+        else:
+            pos_image = None
 
 
         target_description = None
@@ -88,15 +96,42 @@ class VisragDatasetProcessor(VideoDatasetProcessor):
             target_description = self.target_descriptions.get((batch_dict['id'][idx],))
             # if target_description is None:
                 # print(f"No target description found for id {batch_dict['id'][idx]} for {self.dataset_config['dataset_name']} dataset")
-                
+        
+        if self.data_args.hard_negative_dir:
+            hard_negative_samples = batch_dict['hard_negatives'][idx]
+            hard_negative_samples = [self.non_iter_dataset[i] for i in hard_negative_samples]
+            neg_text = []
+            neg_image = []
+            if self.target_descriptions:
+                neg_description = []
+            else:
+                neg_description = [""] * len(hard_negative_samples)
+            
+            for sample in hard_negative_samples:
+                image = sample['image']
+                if isinstance(image, Image.Image):
+                    # BC, datasets==2.21.0
+                    image_bytes = image_to_bytes(image)
+                    path = ""
+                elif type(image) is dict:
+                    # datasets==3.3.2
+                    image_bytes = image['bytes']
+                    path = image['path']
+                neg_image.append({"bytes": [image_bytes], "paths": [path], "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]})
+                neg_text.append(process_query('', prompt=target_source2prompt.get(sample['source'], ""), image_token=VLM_IMAGE_TOKENS[model_backbone]))
+                if self.target_descriptions:
+                    neg_description.append(self.target_descriptions.get((sample['id'],)))
+
+
         return {"query_text": query, 
                 "query_image": None,
                 "pos_text": pos_text, 
                 "pos_image": pos_image,
-                "neg_text": "", 
-                "neg_image": None,
+                "neg_text": neg_text, 
+                "neg_image": neg_image,
                 "query_description": None,
-                "target_description": target_description}
+                "target_description": target_description,
+                "neg_description": neg_description}
 
 
 @AutoSFTDataset.register(DATASET_PARSER_NAME)

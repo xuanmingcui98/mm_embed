@@ -54,7 +54,7 @@ class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         corpus = corpus.map(lambda x: self.corpus_prepare(x, **self.dataset_config), batched=True,
                             batch_size=1024, #num_proc=4,
                             drop_last_batch = False, load_from_cache_file=False)
-        corpus = corpus.select_columns(['cand_text', 'cand_image', 'dataset_infos'])
+        corpus = corpus.select_columns(['cand_text', 'cand_image', 'dataset_infos', 'target_description'])
 
         return dataset, corpus
 
@@ -106,6 +106,7 @@ class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             rel_scores.append(rel_score)
 
         dataset_info = {
+            "query_id": (query,), 
             "cand_names": cand_names,
             "label_name": label_names,
             "rel_scores": rel_scores,
@@ -125,7 +126,7 @@ class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         image_resolution, model_backbone = kwargs['image_resolution'], kwargs['model_backbone']
         image_root = kwargs['image_root']
 
-        cand_texts, cand_images, dataset_infos = [], [], []
+        cand_texts, cand_images, dataset_infos, target_descriptions = [], [], [], []
         for image_name, image in zip(batch_dict['corpus-id'], batch_dict['image']):
             # some image_name are super long...
             base, ext = os.path.splitext(image_name)
@@ -136,8 +137,8 @@ class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                 os.makedirs(image_root, exist_ok=True)
                 image.save(image_path)
 
+            target_description = None
             if self.apply_chat_template:
-                target_description = None
                 if self.target_descriptions:
                     target_description = self.target_descriptions.get((new_imagename,))
                     if not target_description:
@@ -151,6 +152,8 @@ class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             else:
                 cand_texts.append([process_input_text(TASK_INST_TGT, model_backbone, add_image_token=True)])
 
+            target_descriptions.append(target_description)
+
             cand_images.append([ImageVideoInstance(
                 bytes=[None],
                 paths=[image_path],
@@ -158,7 +161,8 @@ class VisRAGEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             ).to_dict()])
             dataset_infos.append({
                 "cand_names": [image_name],
+                "rerank_context": target_description
             })
 
         return {"cand_text": cand_texts, "cand_image": cand_images,
-                "dataset_infos": dataset_infos}
+                "dataset_infos": dataset_infos, "target_description": target_descriptions}

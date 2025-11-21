@@ -109,6 +109,7 @@ class NextQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         cand_image = [None] * len(cand_text)
 
         dataset_info = {
+            "query_id": (query, video_id),
             "question_id": qid,
             "video_id": video_id,
             "query": query_text,

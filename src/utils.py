@@ -3,6 +3,7 @@ logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s [%(n
 logger = logging.getLogger(__name__)
 import torch
 import os
+from tqdm import tqdm
 
 def print_rank(message):
     """If distributed is initialized, print the rank."""
@@ -19,6 +20,19 @@ def print_master(message):
             logger.info(message)
     else:
         logger.info(message)
+
+def is_main_process() -> bool:
+    return os.environ.get("RANK", "0") == "0"
+
+
+def print0(*args, **kwargs):
+    if is_main_process():
+        print(*args, **kwargs)
+
+
+def tqdm0(it, **kw):
+    kw.setdefault("disable", not is_main_process())
+    return tqdm(it, **kw)
 
 
 def find_latest_checkpoint(output_dir):
@@ -47,3 +61,6 @@ def batch_to_device(batch, device):
         else:
             _batch[key] = value
     return _batch
+
+
+

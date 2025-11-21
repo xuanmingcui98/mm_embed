@@ -42,3 +42,6 @@ from .image_i2i_vg_dataset import ImageI2IVGEvalDatasetProcessor
 # VisDoc
 from .vidore_dataset import VidoreEvalDatasetProcessor
 from .visrag_dataset import VisRAGEvalDatasetProcessor
+
+
+from .multilingual_t2i import MultiLingualT2IEvalDatasetProcessor

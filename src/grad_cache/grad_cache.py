@@ -319,12 +319,15 @@ class GradCache:
                 all_rnd_states.append(rnd_states)
                 
                 task_ids = []
-                for i in x:
-                    task_ids.append(list(i.values())[0]['task_id'])
-                
-                all_task_ids.append(torch.cat(task_ids, dim=0))
+                if next(iter(x[0])) != "neg":
+                    for i in x:
+                        task_ids.append(list(i.values())[0]['task_id'])
+                    all_task_ids.append(torch.cat(task_ids, dim=0))
 
-            cache, loss = self.build_cache(*all_reps, *all_task_ids, **loss_kwargs)
+            loss_kwargs["x_task_ids"] = all_task_ids[0]
+            loss_kwargs["y_task_ids"] = all_task_ids[1]
+
+            cache, loss = self.build_cache(*all_reps, **loss_kwargs)
             cache = [c.split(chunk_size) for c, chunk_size in zip(cache, self.chunk_sizes)]
             loss_dict['cl_loss'] = loss
 
@@ -343,3 +346,5 @@ class GradCache:
             
 
         return loss_dict
+
+

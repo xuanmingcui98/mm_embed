@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, List
 import torch
 import os
 import torch.distributed as dist
@@ -14,6 +14,7 @@ from src.model.processor import (LLAVA_NEXT, QWEN2_VL, PHI3V,
                                  QWEN2_5_VL, INTERNVIDEO2,
                                  QWEN2_VL_TOKENSELECTION, 
                                  backbone2model, GME, VLM_IMAGE_TOKENS, 
+                                 QWEN3_VL,
                                  LamRA, LamRA_QWEN2_5, COLPALI, INTERNVL3, E5_V, PLM)
 from src.model.baseline_backbone.colpali import ColPali
 from src.model.baseline_backbone.gme.gme_inference import GmeQwen2VL
@@ -81,8 +82,6 @@ class MMEBModel(nn.Module):
 
         if model_config.meta_queries is not None and model_config.meta_queries > 0:
             self.meta_queries = [f'<meta_query_{i}>' for i in range(model_config.meta_queries)]
-
-        self.use_gradient_checkpointing = False
 
 
     def gradient_checkpointing_enable(self, gradient_checkpointing_kwargs=None):
@@ -295,11 +294,20 @@ class MMEBModel(nn.Module):
             )
         elif model_args.model_backbone == QWEN2_5_VL:
             from transformers import Qwen2_5_VLForConditionalGeneration
-            # config._attn_implementation = "flash_attention_2" 
-            config._attn_implementation = "sdpa" 
+            config._attn_implementation = "flash_attention_2" 
+            # config._attn_implementation = "sdpa" 
             config.padding_side = "left"
             config.use_cache = False
             base_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(model_args.model_name, 
+                                                                            config=config,
+                                                                            torch_dtype=torch.bfloat16)
+        elif model_args.model_backbone == QWEN3_VL:
+            from transformers import Qwen3VLForConditionalGeneration
+            config._attn_implementation = "flash_attention_2" 
+            # config._attn_implementation = "sdpa" 
+            config.padding_side = "left"
+            config.use_cache = False
+            base_model = Qwen3VLForConditionalGeneration.from_pretrained(model_args.model_name, 
                                                                             config=config,
                                                                             torch_dtype=torch.bfloat16)
         elif model_backbone in [PLM]:
@@ -350,17 +358,18 @@ class MMEBModel(nn.Module):
                 torch_dtype=torch.bfloat16,
                 trust_remote_code=True)
 
-        if model_args.sft_checkpoint_path:
-            checkpoint_path = model_args.sft_checkpoint_path
+        if model_args.base_lora_checkpoint_path:
+            checkpoint_path = model_args.base_lora_checkpoint_path
             print(f'Loading existing lora adapter from {checkpoint_path} into base model')
             lora_config = LoraConfig.from_pretrained(checkpoint_path)
-            state_dict = torch.load(os.path.join(checkpoint_path, 'adapter_model.bin'), map_location='cpu')
-            if 'encoder.' in list(state_dict.keys())[0]:
-                state_dict = {k.replace("encoder.", ""): v for k, v in state_dict.items()}
-                torch.save(state_dict, os.path.join(checkpoint_path, 'adapter_model.bin'))
-            lora_model = PeftModel.from_pretrained(base_model, checkpoint_path, config=lora_config)
+            # state_dict = torch.load(os.path.join(checkpoint_path, 'adapter_model.bin'), map_location='cpu')
+            # if 'encoder.' in list(state_dict.keys())[0]:
+            #     state_dict = {k.replace("encoder.", ""): v for k, v in state_dict.items()}
+            #     torch.save(state_dict, os.path.join(checkpoint_path, 'adapter_model.bin'))
+            
+            base_model = PeftModel.from_pretrained(base_model, checkpoint_path, config=lora_config, is_trainable=True)
 
-            base_model = lora_model.merge_and_unload()
+            # base_model = lora_model.merge_and_unload()
 
         modules_to_save = None
         if model_args.meta_queries is not None and model_args.meta_queries > 0:
@@ -371,7 +380,7 @@ class MMEBModel(nn.Module):
             base_model.resize_token_embeddings(len(processor.tokenizer))
             modules_to_save = ["embed_tokens"]
 
-        if model_args.lora:
+        if model_args.lora and not model_args.base_lora_checkpoint_path:
             print_master(f'Loading lora adapter from {base_model}')
             lora_config = LoraConfig(
                 r=model_args.lora_r,
@@ -386,17 +395,17 @@ class MMEBModel(nn.Module):
             base_model.enable_input_require_grads()
             base_model = get_peft_model(base_model, lora_config)
 
-            if model_args.meta_queries is not None and model_args.meta_queries > 0:
-                meta_query_ids = processor.tokenizer.convert_tokens_to_ids(
-                    [f'<meta_query_{i}>' for i in range(model_args.meta_queries)])
-                embedding = base_model.get_input_embeddings()
-                def grad_filter(grad):
-                    # @xuanming dirty way to not update the old embeddings. Since weight decay is 0 by default, this should be fine
-                    mask = torch.zeros_like(grad)
-                    mask[meta_query_ids, :] = 1.0
-                    return grad * mask
+        if model_args.meta_queries is not None and model_args.meta_queries > 0:
+            meta_query_ids = processor.tokenizer.convert_tokens_to_ids(
+                [f'<meta_query_{i}>' for i in range(model_args.meta_queries)])
+            embedding = base_model.get_input_embeddings()
+            def grad_filter(grad):
+                # @xuanming dirty way to not update the old embeddings. Since weight decay is 0 by default, this should be fine
+                mask = torch.zeros_like(grad)
+                mask[meta_query_ids, :] = 1.0
+                return grad * mask
 
-                embedding.weight.register_hook(grad_filter)
+            embedding.weight.register_hook(grad_filter)
 
 
         pooling_module = None
@@ -513,17 +522,17 @@ class MMEBModel(nn.Module):
                 torch_dtype=torch.bfloat16,
                 trust_remote_code=True)
 
-        if model_args.sft_checkpoint_path is not None:
-            print_master(f'Loading SFT checkpoint from {model_args.sft_checkpoint_path}')
-            sft_checkpoint_path = model_args.sft_checkpoint_path
-            sft_lora_config = LoraConfig.from_pretrained(sft_checkpoint_path)
-            sft_state_dict = torch.load(os.path.join(sft_checkpoint_path, 'adapter_model.bin'), map_location='cpu')
-            if 'encoder.' in list(sft_state_dict.keys())[0]:
-                sft_state_dict = {k.replace("encoder.", ""): v for k, v in sft_state_dict.items()}
-                torch.save(sft_state_dict, os.path.join(sft_checkpoint_path, 'adapter_model.bin'))
-            sft_lora_model = PeftModel.from_pretrained(base_model, sft_checkpoint_path, config=sft_lora_config)
+        # if model_args.base_lora_checkpoint_path is not None:
+        #     print_master(f'Loading SFT checkpoint from {model_args.base_lora_checkpoint_path}')
+        #     base_lora_checkpoint_path = model_args.base_lora_checkpoint_path
+        #     sft_lora_config = LoraConfig.from_pretrained(base_lora_checkpoint_path)
+        #     sft_state_dict = torch.load(os.path.join(base_lora_checkpoint_path, 'adapter_model.bin'), map_location='cpu')
+        #     if 'encoder.' in list(sft_state_dict.keys())[0]:
+        #         sft_state_dict = {k.replace("encoder.", ""): v for k, v in sft_state_dict.items()}
+        #         torch.save(sft_state_dict, os.path.join(base_lora_checkpoint_path, 'adapter_model.bin'))
+        #     sft_lora_model = PeftModel.from_pretrained(base_model, base_lora_checkpoint_path, config=sft_lora_config)
 
-            base_model = sft_lora_model.merge_and_unload()
+        #     base_model = sft_lora_model.merge_and_unload()
 
 
         if model_args.meta_queries is not None and model_args.meta_queries > 0:
@@ -602,20 +611,26 @@ class MMEBModel(nn.Module):
     def save(self, output_dir: str):
         self.encoder.save_pretrained(output_dir)
 
-    def forward(self, qry: Dict[str, Tensor] = None, tgt: Dict[str, Tensor] = None, *args, **kwargs):
+    def forward(self, qry: Dict[str, Tensor] = None, tgt: Dict[str, Tensor] = None, neg: Dict[str, List[Tensor]] = None, *args, **kwargs):
+
+        qry_reps = tgt_reps = neg_reps = None
         if qry is not None:
             qry_reps, qry_res = self.encode_input(qry, do_sft=self.model_config.do_sft_query)
-        else:
-            qry_reps = None
+
         if tgt is not None:
             tgt_reps, tgt_res = self.encode_input(tgt, do_sft=self.model_config.do_sft_target)
-        else:
-            tgt_reps = None
+
+        if neg is not None:
+            negs = []
+            for i in neg:
+                rep, _ = self.encode_input(i)
+                negs.append(rep.unsqueeze(1))
+            neg_reps = torch.cat(negs, dim=1)
 
         loss_dict = {}
 
         if self.model_config.do_cl:
-            if qry_reps is None or tgt_reps is None:
+            if qry_reps is None or tgt_reps is None :
 
                 qry_sft_loss = tgt_sft_loss = None
                 loss = 0.
@@ -626,7 +641,7 @@ class MMEBModel(nn.Module):
                     if self.model_config.do_sft_target and tgt is not None:
                         tgt_sft_loss = tgt_res.loss
                         loss = loss + tgt_sft_loss
-                return {"qry_reps": qry_reps, "tgt_reps": tgt_reps, "qry_sft_loss": qry_sft_loss, "tgt_sft_loss": tgt_sft_loss, "loss": loss}
+                return {"qry_reps": qry_reps, "tgt_reps": tgt_reps, "neg_reps": neg_reps, "qry_sft_loss": qry_sft_loss, "tgt_sft_loss": tgt_sft_loss, "loss": loss}
 
 
             # if self.is_ddp:
@@ -648,7 +663,7 @@ class MMEBModel(nn.Module):
             # #     cl_loss = cl_loss * self.world_size
 
             # loss_dict['cl_loss'] = cl_loss
-            cl_loss = self.loss_fn(x = qry_reps, y = tgt_reps, 
+            cl_loss = self.loss_fn(x = qry_reps, y = tgt_reps, hard_neg = neg_reps,
                                    x_task_ids = qry['task_id'], y_task_ids = tgt['task_id'], 
                                    temperature = self.temperature, 
                                    inter_task_temperature = self.inter_task_temperature)

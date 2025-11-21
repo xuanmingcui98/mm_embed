@@ -19,7 +19,7 @@ from ..dataset_hf_path import EVAL_DATASET_HF_PATH
 from ...model.processor import VLM_VIDEO_TOKENS
 from .video_classification_utils import VIDEOCLS_LABEL_MAPPING, DATASET_INSTRUCTION
 from ..loader.mixed_dataset import add_metainfo_hook
-
+from ...utils import tqdm0
 
 # Schema for evaluation dataset, not used in the code.
 EVAL_QRY_FEATURES = Features(**{
@@ -59,6 +59,17 @@ RESOLUTION_MAPPING = {
     "low": (128, 128),
 }
 
+def to_list(x):
+    if not isinstance(x, list):
+        return [x]
+    
+    return x
+
+def to_ele(x):
+    if isinstance(x, list):
+        return x[0]
+    return x
+
 
 class ImageVideoInstance:
     """
@@ -77,40 +88,7 @@ class ImageVideoInstance:
             "paths": self.paths,
             "resolutions": self.resolutions,
         }
-
-def generate_cand_dataset(dataset, corpus):
-    """
-    Used for generating candidate datasets.
-    Flatten candidates, merge with corpus, deduplication
-    """
-    cand_rows = []
-    all_cand_name = set()
-    for row in dataset:
-        assert len(row["cand_text"]) == len(row["cand_image"]) == len(row["dataset_infos"]["cand_names"])
-        for cand_text, cand_image, cand_name in zip(row["cand_text"], row["cand_image"], row["dataset_infos"]["cand_names"]):
-            if cand_name not in all_cand_name:
-                cand_rows.append({
-                    "cand_text": [cand_text],
-                    "cand_image": [cand_image],
-                    "dataset_infos": {"cand_name": cand_name},
-                })
-                all_cand_name.add(cand_name)
-
-    if corpus is not None:
-        for row in corpus:
-            assert len(row["cand_text"]) == len(row["cand_image"]) == len(row["dataset_infos"]["cand_names"]) == 1
-            cand_name = row["dataset_infos"]["cand_names"][0]
-            if cand_name not in all_cand_name:
-                cand_rows.append({
-                    "cand_text": row["cand_text"],
-                    "cand_image": row["cand_image"],
-                    "dataset_infos": {"cand_name": row["dataset_infos"]["cand_names"][0]},
-                })
-                all_cand_name.add(cand_name)
-
-    cand_dataset = Dataset.from_list(cand_rows)
-    return cand_dataset
-
+    
 class BaseEvalDatasetProcessor:
 
     def __init__(self,
@@ -177,19 +155,15 @@ class BaseEvalDatasetProcessor:
         self.dataset, self.corpus = self._load_hf_dataset()
         # debug: take 1 row
         if self.data_args.debug_prompt:
-            self.dataset = self.dataset.select(range(1))
+            self.dataset = self.dataset.select(range(1024))
         self.dataset = sample_dataset(self.dataset, **self.dataset_config)
-        # self.add_signature_columns()
-        # if self.data_args.apply_chat_template:
-        #     self.prepared_targets = self.prepare_targets()
         self.dataset = self.dataset.map(lambda x: self.batch_preprocess(x, **self.dataset_config), batched=True,
-                            batch_size=1024, # num_proc=4,
+                            batch_size=32, num_proc=0,
                             drop_last_batch=False, load_from_cache_file=False)
-        # else:
-        #     self.dataset = self.dataset.map(lambda x: self.batch_preprocess_bm(x, **dataset_config), batched=True,
-        #                         batch_size=256, num_proc=4,
-        #                         drop_last_batch=False, load_from_cache_file=False)
-        self.dataset = self.dataset.select_columns(["query_text", "query_image", "cand_text", "cand_image", "dataset_infos"])
+        # self.dataset = self.dataset.add_column("query_id", [row['dataset_infos']['query_id'] for row in self.dataset])
+        # self.dataset = self.dataset.select_columns(["query_text", "query_image", "cand_text", "cand_image", "dataset_infos", "query_description"])
+        # self.dataset = self.dataset.to_pandas().drop_duplicates(subset=['query_id'])
+        # self.dataset = Dataset.from_pandas(self.dataset, preserve_index=False)
         self.candidate_dataset = self.generate_cand_dataset()
         return self.dataset, self.candidate_dataset
 
@@ -211,28 +185,34 @@ class BaseEvalDatasetProcessor:
         Flatten candidates, merge with corpus, deduplication
         """
         cand_rows = []
+
         all_cand_name = set()
-        for row in self.dataset:
+        for row in tqdm0(self.dataset):
             assert len(row["cand_text"]) == len(row["cand_image"]) == len(row["dataset_infos"]["cand_names"])
-            for cand_text, cand_image, cand_name in zip(row["cand_text"], row["cand_image"], row["dataset_infos"]["cand_names"]):
+
+            rerank_contexts = row['dataset_infos'].get('rerank_context', row["dataset_infos"]["cand_names"])
+            for cand_text, cand_image, cand_name, target_description in zip(row["cand_text"], row["cand_image"], row["dataset_infos"]["cand_names"], rerank_contexts):
 
                 if cand_name not in all_cand_name:
                     cand_rows.append({
                         "cand_text": [cand_text],
                         "cand_image": [cand_image],
-                        "dataset_infos": {"cand_name": cand_name},
+                        "dataset_infos": {"cand_name": cand_name,
+                                          "rerank_context": target_description if target_description else to_ele(cand_name)},
                     })
                     all_cand_name.add(cand_name)
 
         if self.corpus is not None:
             for row in self.corpus:
                 assert len(row["cand_text"]) == len(row["cand_image"]) == len(row["dataset_infos"]["cand_names"]) == 1
+                target_description = row['dataset_infos'].get('rerank_context')
                 cand_name = row["dataset_infos"]["cand_names"][0]
                 if cand_name not in all_cand_name:
                     cand_rows.append({
                         "cand_text": row["cand_text"],
                         "cand_image": row["cand_image"],
-                        "dataset_infos": {"cand_name": row["dataset_infos"]["cand_names"][0]},
+                        "dataset_infos": {"cand_name": row["dataset_infos"]["cand_names"][0],
+                                         "rerank_context": target_description if target_description else row["dataset_infos"]["cand_names"][0]},
                     })
                     all_cand_name.add(cand_name)
 
@@ -326,11 +306,13 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
         image_root = self.dataset_config['image_root']
 
         query_texts, query_images, cand_texts, cand_images, dataset_infos, query_descriptions, target_descriptions = [], [], [], [], [], [], []
+        
         for qry_text, qry_image_path, tgt_texts, tgt_image_paths in (
-                zip(batch_dict['qry_text'], batch_dict['qry_img_path'], batch_dict['tgt_text'], batch_dict['tgt_img_path'])):
-
+            zip(batch_dict['qry_text'], batch_dict['qry_img_path'], batch_dict['tgt_text'], batch_dict['tgt_img_path'])):
+            
+            rerank_context = []
+            orig_qry_text = qry_text
             query_description = target_description = None
-
             if qry_image_path.strip():
                 query_images.append([{"bytes": [None], "paths": [os.path.join(image_root, qry_image_path)],
                                     "resolutions": [RESOLUTION_MAPPING.get(image_resolution, None)]}])
@@ -351,9 +333,10 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
                     cand_texts.append(tgts)
             else:
 
-                if not (not qry_image_path.strip() and self.data_args.rewrites_for_mm_only) and (self.encode_side != 'target'):
-                    query_description = self.query_descriptions[(qry_text, qry_image_path)] if self.query_descriptions is not None else None
+                # if not (not qry_image_path.strip() and self.data_args.rewrites_for_mm_only): # and (self.encode_side != 'target'):
+                query_description = self.query_descriptions[(qry_text, qry_image_path)] if self.query_descriptions is not None else None
 
+                
                 qry_text = self.format_text_for_chat_template(True, 
                                                               text=qry_text, 
                                                               image_path=qry_image_path, 
@@ -361,8 +344,9 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
                                                               description=query_description)
                 cand_text = []
                 for tgt_cap, tgt_img_path in zip(tgt_texts, tgt_image_paths):
+                    rerank_context.append((tgt_cap, tgt_img_path))
                     if (tgt_cap, tgt_img_path) not in self.target_cache:
-                        if not (not tgt_img_path.strip() and self.data_args.rewrites_for_mm_only) and (self.encode_side != "query"):
+                        if not (not tgt_img_path.strip() and self.data_args.rewrites_for_mm_only): # and (self.encode_side != "query"):
                             target_description = self.target_descriptions[(tgt_cap, tgt_img_path)] if self.target_descriptions is not None else None
                         self.target_cache[(tgt_cap, tgt_img_path)] = self.format_text_for_chat_template(
                                                                         False, 
@@ -372,11 +356,12 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
                                                                         description=target_description)
                         
                     cand_text.append(self.target_cache[(tgt_cap, tgt_img_path)])
+
                 cand_texts.append(cand_text)
 
             query_texts.append([qry_text])
             query_descriptions.append(query_description)
-            target_descriptions.append(target_description)
+            # target_descriptions.append(target_description)
 
             if tgt_image_paths[0].strip():
                 cand_img_paths = [os.path.join(image_root, tgt_img_path) for tgt_img_path in tgt_image_paths]
@@ -387,16 +372,18 @@ class MMEBEvalDatasetProcessor(BaseEvalDatasetProcessor):
                 cand_images.append([None] * len(tgt_texts))
             # this is used for dedup, especially important for RefCOCO-Matching, as multiple objects in the same image can be targets, so we need to use path+caption as key
             cand_names = [path+':'+cap.strip('"') for path, cap in zip(tgt_image_paths, tgt_texts)]
+            query_text_id = query_description or extract_query(orig_qry_text, subset=self.subset_name)
             dataset_infos.append({
+                "query_id": (query_text_id, qry_image_path),
                 "cand_names": cand_names,
+                "rerank_context": rerank_context if rerank_context else tgt_texts,
                 "label_name": cand_names[0],
             })
 
         return {"query_text": query_texts, "query_image": query_images,
                 "cand_text": cand_texts, "cand_image": cand_images,
                 "dataset_infos": dataset_infos,
-                "query_description": query_descriptions,
-                "target_description": target_descriptions,}
+                "query_description": query_descriptions}
 
 class MMEBV2EvalDatasetProcessor(BaseEvalDatasetProcessor):
 
@@ -417,14 +404,6 @@ class MMEBV2EvalDatasetProcessor(BaseEvalDatasetProcessor):
                 one_sample['cand_text'], one_sample['cand_image'], \
                 one_sample['dataset_infos'], \
                 one_sample['query_description'], one_sample['target_description']
-            
-            if self.encode_side == 'query':
-                target_description = None
-            elif self.encode_side == 'target':
-                query_description = None
-
-            query_descriptions.append(query_description)
-            target_descriptions.append(target_description)
 
             if self.data_args.apply_chat_template:
 
@@ -478,7 +457,18 @@ class MMEBV2EvalDatasetProcessor(BaseEvalDatasetProcessor):
                         description=single_tasrget_description
                         ))
             else:
-                cands = cand_text
+                cands = [cand_text]
+
+            if self.encode_side == 'query':
+                target_description = [None]
+            elif self.encode_side == 'target':
+                query_description = [None]
+
+            query_descriptions.append(query_description)
+            target_descriptions.append(target_description)
+
+            dataset_info['rerank_context'] = target_description if target_description and target_description[0] else cand_text
+            dataset_info['query_id'] = [str(x) for x in dataset_info['query_id']]
             query_texts.append([query_text])
             query_images.append([query_image])
             cand_texts.append(cands)
@@ -488,8 +478,7 @@ class MMEBV2EvalDatasetProcessor(BaseEvalDatasetProcessor):
         return {"query_text": query_texts, "query_image": query_images,
                 "cand_text": cand_texts, "cand_image": cand_images,
                 "dataset_infos": dataset_infos,
-                "query_description": query_descriptions,
-                "target_description": target_descriptions,}
+                "query_description": query_descriptions}
 
     def format_text_for_chat_template(self, is_query, text=None, image_path=None, video_path=None, description=None, add_generation_prompt=False):
 

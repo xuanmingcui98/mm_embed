@@ -29,7 +29,7 @@ class ModelArguments:
 
 
     # added
-    sft_checkpoint_path: str = field(default=None, metadata={"help": "a local model path for supervised fine-tuning-based VLM"})
+    base_lora_checkpoint_path: str = field(default=None, metadata={"help": "a local model path for supervised fine-tuning-based VLM"})
     freeze_base_model: bool = field(
         default=False,
         metadata={"help": "freeze base model"}
@@ -86,7 +86,12 @@ class DataArguments:
     cache_dataset_dir: str = field(default=None, metadata={"help": "directory to save the processed dataset cache"})
     cluster_path: str = field(default="")
     shuffle: bool = field(default=False)
+    fast_iter_with_no_visual: bool = field(default=False)
 
+    hard_negative_dir: str = field(default=None)
+    hard_negative_filter_strategy: str = field(default="pp")
+    hard_negative_filter_threshold: float = field(default=1.)
+    hard_negatives_per_sample: int = field(default=7)
 
 @dataclass
 class TrainingArguments(TrainingArguments):

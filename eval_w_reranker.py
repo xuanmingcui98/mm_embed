@@ -52,7 +52,8 @@ def encode_embeddings(
     model_args: ModelArguments,
     full_dataset: Dataset,
     encode_side: str,
-    description: str = "Encoding"
+    description: str = "Encoding",
+    debug_prompt: bool = False
 ) -> tuple[np.ndarray, list]:
     """
     Encodes embeddings for a given dataset using the model, handling both standard and
@@ -68,7 +69,7 @@ def encode_embeddings(
     local_gt_infos = []
     local_max_len = 0
 
-    ecrs = []
+    target_ecrs = []
 
     model.eval()
     with torch.no_grad():
@@ -77,13 +78,20 @@ def encode_embeddings(
             with torch.autocast(enabled=True, dtype=torch.bfloat16, device_type="cuda"):
                 # Determine if encoding query or target based on available keys
                 if encode_side == "qry":
-                    output = model(qry=inputs)
-                    reps = output["qry_reps"].detach()
+                    if debug_prompt:
+                        reps = torch.zeros((inputs['input_ids'].shape[0], 100))
+                    else:
+                        output = model(qry=inputs)
+                        reps = output["qry_reps"].detach()
                     local_gt_infos.extend(dataset_info)  # to retain all information per query
                 else:
-                    output = model(tgt=inputs)
-                    reps = output["tgt_reps"].detach()
+                    if debug_prompt:
+                        reps = torch.zeros((inputs['input_ids'].shape[0], 100))
+                    else:
+                        output = model(tgt=inputs)
+                        reps = output["tgt_reps"].detach()
                     local_gt_infos.extend([info["cand_name"] for info in dataset_info])  # to retain ground-truth labels
+                    target_ecrs.extend([info['rerank_context'] for info in dataset_info])
 
             if is_late_interaction and reps.dim() == 3:
                 local_max_len = max(local_max_len, reps.shape[1])
@@ -133,13 +141,19 @@ def encode_embeddings(
         final_embeddings = gathered_embeds_tensor.cpu().float().numpy()
         # Gather metadata, for which all_gather_object is appropriate
         gathered_gt_infos = [None for _ in range(world_size)]
+        all_target_ecrs = [None for _ in range(world_size)]
         dist.all_gather_object(gathered_gt_infos, local_gt_infos)
+        dist.all_gather_object(all_target_ecrs, target_ecrs)
         all_gt_infos = [key for rank_keys in gathered_gt_infos for key in rank_keys]
+        all_target_ecrs = [key for rank_keys in all_target_ecrs for key in rank_keys]
+
+
     else:
         all_gt_infos = local_gt_infos
+        all_target_ecrs = target_ecrs
         final_embeddings = embeds_tensor.cpu().float().numpy()
 
-    return final_embeddings, all_gt_infos
+    return final_embeddings, all_gt_infos, all_target_ecrs
 
 
 def parse_eval_args():
@@ -150,6 +164,7 @@ def parse_eval_args():
     parser.add_argument("--output_dir", type=str, default="eval", help="Directory to save evaluation results")
     parser.add_argument("--query_description_dir", type=str, default=None, help="Directory containing dataset descriptions")
     parser.add_argument("--target_description_dir", type=str, default=None, help="Directory containing dataset descriptions")
+    parser.add_argument("--debug_prompt", action="store_true", help="Directory containing dataset descriptions")
 
     return parser.parse_args()
 
@@ -203,7 +218,7 @@ def main():
         setattr(training_args, 'model_backbone', model_backbone)
     print_master(f'Model Backbone: {model_args.model_backbone}')
     # --- DDP-Safe Model Loading ---
-    # Step 1: Only the master process (rank 0) downloads the model.
+    # Step 1: Only the master process (rank 0) downloads the model. 
     if local_rank == 0:
 
         model, processor = MMEBModel.load(model_args, data_args, is_trainable=False)
@@ -226,8 +241,6 @@ def main():
     os.makedirs(encode_output_path, exist_ok=True)
     # --- Main Evaluation Loop ---
     for dataset_idx, (dataset_name, task_config) in enumerate(dataset_configs.items()):
-        # try:
-        # 0. load dataset
         if dist.is_initialized():
             dist.barrier()
         print_master(f"--- Evaluating {dataset_name} ---")
@@ -239,6 +252,9 @@ def main():
         query_embed_path = os.path.join(encode_output_path, f"{dataset_name}_qry")
         cand_embed_path = os.path.join(encode_output_path, f"{dataset_name}_tgt")
         dataset_info_path = os.path.join(encode_output_path, f"{dataset_name}_info.jsonl")
+
+        if data_args.target_description_dir and os.path.exists(os.path.join(data_args.target_description_dir, dataset_name, "cot", "target.pkl")):
+            target_descriptions = pickle.load(open(os.path.join(data_args.target_description_dir, dataset_name, "cot", "target.pkl"), "rb"))
 
         do_query = not os.path.exists(query_embed_path) or not os.path.exists(dataset_info_path)
         do_cand = not os.path.exists(cand_embed_path)
@@ -267,12 +283,16 @@ def main():
             print_master("Encoding queries...")
             eval_qry_collator = MultimodalEvalDataCollator(processor, model_args, data_args, "qry")
             eval_qry_loader = DataLoader(eval_qry_dataset, batch_size=training_args.per_device_eval_batch_size, collate_fn=eval_qry_collator, num_workers=training_args.dataloader_num_workers)
-            query_embeds, gt_infos = encode_embeddings(model, eval_qry_loader, training_args, model_args, padded_qry_dataset, encode_side="qry", description=f"Queries for {dataset_name}")
+            query_embeds, gt_infos, _ = encode_embeddings(model, eval_qry_loader, training_args, model_args, padded_qry_dataset, encode_side="qry", description=f"Queries for {dataset_name}")
             query_embeds = query_embeds[:len(full_eval_qry_dataset)]  # world_size>1, trim the padded data points
             gt_infos = gt_infos[:len(full_eval_qry_dataset)]
+            query_key_to_embed = {}
+            for gt_info, embed in zip(gt_infos, query_embeds):
+                query_key_to_embed[tuple(gt_info['query_id'])] = embed
+
             if local_rank == 0:
                 with open(query_embed_path, 'wb') as f:
-                    pickle.dump(query_embeds, f)
+                    pickle.dump(query_key_to_embed, f)
                 with open(dataset_info_path, 'w') as f:
                     for info in gt_infos:
                         f.write(json.dumps(info) + '\n')
@@ -287,12 +307,13 @@ def main():
             eval_cand_collator = MultimodalEvalDataCollator(processor, model_args, data_args, "cand")
             eval_cand_loader = DataLoader(eval_cand_dataset, batch_size=training_args.per_device_eval_batch_size, collate_fn=eval_cand_collator, num_workers=training_args.dataloader_num_workers)
 
-            cand_embeds, all_cand_ids = encode_embeddings(model, eval_cand_loader, training_args, model_args, padded_cand_dataset, encode_side="cand", description=f"Candidates for {dataset_name}")
+            cand_embeds, all_cand_ids, all_target_ecrs = encode_embeddings(model, eval_cand_loader, training_args, model_args, padded_cand_dataset, encode_side="cand", description=f"Candidates for {dataset_name}")
             cand_embeds = cand_embeds[:len(full_eval_cand_dataset)]  # world_size>1, trim the padded data points
             all_cand_ids = all_cand_ids[:len(full_eval_cand_dataset)]
+            all_target_ecrs = all_target_ecrs[:len(full_eval_cand_dataset)]
 
             if local_rank == 0:
-                cand_embed_dict = {cand_id: embed for cand_id, embed in zip(all_cand_ids, cand_embeds)}
+                cand_embed_dict = {cand_id: (embed, target_ecr) for cand_id, embed, target_ecr in zip(all_cand_ids, cand_embeds, all_target_ecrs)}
                 with open(cand_embed_path, 'wb') as f: pickle.dump(cand_embed_dict, f)
                 print_master(f"Saved candidate embeddings to {cand_embed_path}")
 
@@ -312,15 +333,18 @@ def main():
                     continue
                 except Exception as e:
                     print_master(f"Failed to load score for {dataset_name}, skipping {dataset_name}")
-            with open(query_embed_path, 'rb') as f: qry_embeds = pickle.load(f)
-            with open(cand_embed_path, 'rb') as f: cand_embed_dict = pickle.load(f)
+            with open(query_embed_path, 'rb') as f: 
+                qry_embeds_dict = pickle.load(f)
+            with open(cand_embed_path, 'rb') as f: 
+                cand_embed_dict = pickle.load(f)
             gt_infos = [json.loads(l) for l in open(dataset_info_path)]
             pred_dicts = []
 
             rank_against_all_candidates = task_config.get("eval_type", "global") == "global"
+            qry_embeds = np.array(list(qry_embeds_dict.values()))
             if rank_against_all_candidates:
                 cand_keys = list(cand_embed_dict.keys())
-                cand_embeds = np.stack([cand_embed_dict[key] for key in cand_keys])
+                cand_embeds = np.stack([cand_embed_dict[key][0] for key in cand_keys])
                 # Handle late-interaction scoring
                 if qry_embeds.ndim == 3: # Query: [N_q, L_q, H] | Candidate: [N_c, L_c, H]
                     qry_embed = torch.from_numpy(qry_embeds)
@@ -330,18 +354,28 @@ def main():
                 else: # Dense
                     cosine_scores = np.dot(qry_embeds, cand_embeds.T)
                     ranked_candids = np.argsort(-cosine_scores, axis=1)
-                for qid, (ranked_candid, gt_info) in tqdm(enumerate(zip(ranked_candids, gt_infos)), desc=f"Calculating scores for {dataset_name}"):
+                for qid, (ranked_candid, gt_info, qry_id) in tqdm(enumerate(zip(ranked_candids, gt_infos, list(qry_embeds_dict.keys()))), desc=f"Calculating scores for {dataset_name}"):
                     rel_docids = gt_info["label_name"] if isinstance(gt_info["label_name"], list) else [gt_info["label_name"]]
                     rel_scores = gt_info["rel_scores"] if "rel_scores" in gt_info else None
                     assert rel_scores is None or len(rel_docids) == len(rel_scores)
+                    rerank_context = []
+                    for i in ranked_candid[:50]:
+                        context = cand_embed_dict[cand_keys[i]][1]
+                        if isinstance(context, (tuple, list)): # is a key
+                            context = target_descriptions[context]
+                        rerank_context.append(context)
                     pred_dicts.append({
-                        "prediction": [cand_keys[i] for i in ranked_candid],
+                        "query_id": qry_id,
+                        "prediction": [cand_keys[i] for i in ranked_candid[:50]],
+                        "prediction_rerank_context": rerank_context,
                         "label": rel_docids,
                         "rel_scores": rel_scores,
+                        "sim_scores": [float(cosine_scores[qid, i]) for i in ranked_candid[:50]]
                     })
             else:
                 for qid, (qry_embed, gt_info) in tqdm(enumerate(zip(qry_embeds, gt_infos)), desc=f"Calculating scores for {dataset_name}"):
-                    cand_embeds = np.stack([cand_embed_dict[key] for key in gt_info["cand_names"]])
+                    cand_embeds = np.stack([cand_embed_dict[key][0] for key in gt_info["cand_names"]])
+                    cand_keys = list(cand_embed_dict.keys())
                     if qry_embeds.ndim == 3: # Query: [N_q, L_q, H] | Candidate: [N_c, L_c, H]
                         qry_embed = torch.from_numpy(np.array(qry_embed)).unsqueeze(0)
                         cand_embeds = [torch.from_numpy(np.array(t)) for t in cand_embeds]
@@ -352,19 +386,27 @@ def main():
                         ranked_candids = np.argsort(-cosine_score)
                     rel_docids = gt_info["label_name"] if isinstance(gt_info["label_name"], list) else [gt_info["label_name"]]
                     rel_scores = gt_info["rel_scores"] if "rel_scores" in gt_info else None
-
+                    rerank_context = []
+                    for i in ranked_candids[:50]:
+                        context = gt_info['rerank_context'][i]
+                        if isinstance(context, (tuple, list)): # is a key
+                            context = target_descriptions[tuple(context)]
+                        rerank_context.append(context)
                     assert rel_scores is None or len(rel_docids) == len(rel_scores)
                     pred_dicts.append({
-                        "prediction": [gt_info["cand_names"][i] for i in ranked_candids],
+                        "query_id": gt_info['query_id'],
+                        "prediction": [gt_info["cand_names"][i] for i in ranked_candids[:50]],
+                        "prediction_rerank_context": rerank_context,
                         "label": rel_docids,
                         "rel_scores": rel_scores,
+                        "sim_scores": [float(cosine_score[i]) for i in ranked_candids[:50]]
                     })
 
             score_path = os.path.join(encode_output_path, f"{dataset_name}_score.json")
             pred_path = os.path.join(encode_output_path, f"{dataset_name}_pred.jsonl")
 
             metrics_to_report = task_config["metrics"] if task_config.get("metrics", None) is not None else ["hit", "ndcg", "precision", "recall", "f1", "map", "mrr"]
-            metrics = RankingMetrics(metrics_to_report)
+            metrics = RankingMetrics(metrics_to_report, k_list=(1,5,10,20,50))
             score_dict = metrics.evaluate(pred_dicts)
             formatted = {k: f"{v:.4f}" for k, v in score_dict.items()}
             score_dict["num_pred"] = len(pred_dicts)

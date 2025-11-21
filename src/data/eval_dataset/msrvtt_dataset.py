@@ -65,6 +65,7 @@ class MSRVTTEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         }]
 
         dataset_info = {
+            "query_id": (caption,),
             "cand_names": [video_name],
             "label_name": video_name,
         }

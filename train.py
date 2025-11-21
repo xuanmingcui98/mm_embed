@@ -67,32 +67,34 @@ def main():
     if training_args.resume_from == 'auto':
         resume_checkpoint_dir = find_latest_checkpoint(training_args.output_dir)
         if resume_checkpoint_dir:
-            logger.info(f"Resuming from checkpoint: {resume_checkpoint_dir}")
+            print_master(f"Resuming from checkpoint: {resume_checkpoint_dir}")
     elif training_args.resume_from.isdigit():
         resume_checkpoint_dir = os.path.join(training_args.output_dir, f'checkpoint-{training_args.resume_from}')
         if os.path.exists(resume_checkpoint_dir):
-            logger.info(f"Resuming from checkpoint: {resume_checkpoint_dir}")
+            print_master(f"Resuming from checkpoint: {resume_checkpoint_dir}")
     else:
         resume_checkpoint_dir = None
-        logger.info("No checkpoint found. Starting fresh training.")
+        print_master("No checkpoint found. Starting fresh training.")
 
     model, processor = MMEBModel.build(model_args, data_args)
     setattr(training_args, 'model_backbone', model_args.model_backbone)
 
+    
     with open(data_args.dataset_config, 'r') as yaml_file:
         dataset_config = yaml.safe_load(yaml_file)
         train_dataset = init_mixed_dataset(dataset_config, model_args, data_args, training_args, processor)
 
-    if 'qwen2_5_vl' in model_args.model_backbone:
-        setattr(training_args, "ddp_find_unused_parameters", False)
-        setattr(training_args, "gradient_checkpointing_kwargs", {"use_reentrant": False})
-        do_gradient_checkpointing = not (training_args.deepspeed and "zero3" in training_args.deepspeed)
-        setattr(training_args, "gradient_checkpointing", do_gradient_checkpointing)
+    if 'qwen2_5_vl' in model_args.model_backbone or 'qwen3' in model_args.model_backbone:
+        # setattr(training_args, "ddp_find_unused_parameters", False)
+        # setattr(training_args, "gradient_checkpointing_kwargs", {"use_reentrant": False})
+        # do_gradient_checkpointing = not (training_args.deepspeed and "zero3" in training_args.deepspeed)
+        # setattr(training_args, "gradient_checkpointing", do_gradient_checkpointing)
         train_collator = ContrastiveDataCollator(processor)
     else:
         train_collator = MultimodalDataCollator(processor, model_args, data_args, training_args)
 
     trainer_cls = GradCacheLateProcessTrainer if training_args.grad_cache else MMEBTrainer
+    # setattr(training_args, "gradient_checkpointing", True)
 
     if model_args.do_cl:
         # force it to be 1
@@ -177,3 +179,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+ 

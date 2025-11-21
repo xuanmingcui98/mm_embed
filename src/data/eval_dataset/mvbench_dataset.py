@@ -197,6 +197,7 @@ class MVBenchEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                 print(f'No query description found for ({query_raw}, {video_filename}) for dataset {self.dataset_config["dataset_name"]}')
 
         dataset_info = {
+            "query_id": (query_raw, subset, video_filename),
             "subset": subset,
             "video_id": video_filename,
             "query": query_text,

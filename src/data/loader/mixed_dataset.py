@@ -3,6 +3,7 @@ from collections import defaultdict
 from typing import Union, List, Dict, Any
 from functools import wraps
 import yaml, os
+import datasets
 from datasets import load_from_disk
 from datasets.distributed import split_dataset_by_node
 from datasets import concatenate_datasets
@@ -130,13 +131,13 @@ def add_metainfo_hook(f):
     return wrapper
 
 
-def init_mixed_dataset(dataset_config, model_args, data_args, training_args, processor):
+def init_mixed_dataset(dataset_config, model_args, data_args, training_args, processor, is_iterable=True):
 
     if torch.distributed.is_initialized() and torch.distributed.get_rank() == 0:
         from datasets.utils.logging import disable_progress_bar
         disable_progress_bar()
 
-    weights = [d['weight'] for d in dataset_config.values()]
+    weights = [d.get('weight', 1) for d in dataset_config.values()]
     w_sum = sum(weights)
     probs = [w / w_sum for w in weights]
     world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
@@ -163,17 +164,20 @@ def init_mixed_dataset(dataset_config, model_args, data_args, training_args, pro
     assert total_num_rows >= (training_args.per_device_train_batch_size * world_size), \
         f"total_num_rows(={total_num_rows}) must be greater than or equal to global batch size (={training_args.per_device_train_batch_size * world_size}), since the last batch will be dropped."
 
-    if len(train_datasets) > 1:
-        train_dataset = interleave_datasets(train_datasets, probabilities=probs, batch_size=interleave_batch_size,
-                                            seed=training_args.seed, stopping_strategy=training_args.interleave_stopping_strategy)
-    else:
-        train_dataset = train_datasets[0]
-    
-    if torch.distributed.is_initialized():
-        train_dataset = split_dataset_by_node(train_dataset, rank=torch.distributed.get_rank(), world_size=world_size)
+    if is_iterable:
+        if len(train_datasets) > 1:
+            train_dataset = interleave_datasets(train_datasets, probabilities=probs, batch_size=interleave_batch_size,
+                                                seed=training_args.seed, stopping_strategy=training_args.interleave_stopping_strategy)
+        else:
+            train_dataset = train_datasets[0]
+        
+        if torch.distributed.is_initialized():
+            train_dataset = split_dataset_by_node(train_dataset, rank=torch.distributed.get_rank(), world_size=world_size)
 
-    if not data_args.debug_prompt:
-        setattr(train_dataset, "num_rows", total_num_rows)
+        if not data_args.debug_prompt:
+            setattr(train_dataset, "num_rows", total_num_rows)
+    else:
+        train_dataset = datasets.concatenate_datasets(train_datasets)
 
     return train_dataset
 

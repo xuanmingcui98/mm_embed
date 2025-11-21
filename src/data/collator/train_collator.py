@@ -1,8 +1,9 @@
 from itertools import repeat
 from typing import Optional
 from torch.jit import isinstance
-from typing import Any
+from typing import Any, Dict
 import logging
+import numpy as np
 from dataclasses import dataclass
 from transformers import ProcessorMixin, AutoProcessor, AutoTokenizer
 from ...arguments import DataArguments, ModelArguments, TrainingArguments
@@ -14,7 +15,6 @@ from ...model.processor import LLAVA_NEXT, QWEN2_VL, QWEN2_5_VL, \
 from PIL import Image
 import io
 from ...utils import print_rank, print_master
-from trl.trainer.sft_trainer import DataCollatorForVisionLanguageModeling, prepare_multimodal_messages
 
 logger = logging.getLogger(__name__)
 
@@ -24,20 +24,35 @@ LLAVA_IMAGE_TOKEN_ID = 32000
 
 
 def split_and_process_vlm_inputs(model_input: dict, chunk_size: int):
+
+    def chunk_dict(d):
+        keys = list(d.keys())
+        chunked_tensors = []
+        for k in keys:
+            if isinstance(d[k], torch.Tensor):
+                chunked_tensor = d[k].split(chunk_size, dim=0)
+            else:
+                chunked_tensor = [d[k][i: i + chunk_size] for i in list(range(0, len(d[k]), chunk_size))]
+            chunked_tensors.append(chunked_tensor)
+        chunked_arg_val = [dict(zip(kk, tt)) for kk, tt in zip(repeat(keys), zip(*chunked_tensors))]
+        chunked_inputs = [{arg_key: c} for c in chunked_arg_val]
+        return chunked_inputs
+
     assert len(model_input) == 1
     arg_key = list(model_input.keys())[0]
     arg_val = model_input[arg_key]
 
-    keys = list(arg_val.keys())
-    chunked_tensors = []
-    for k in keys:
-        if isinstance(arg_val[k], torch.Tensor):
-            chunked_tensor = arg_val[k].split(chunk_size, dim=0)
-        else:
-            chunked_tensor = [arg_val[k][i: i + chunk_size] for i in list(range(0, len(arg_val[k]), chunk_size))]
-        chunked_tensors.append(chunked_tensor)
-    chunked_arg_val = [dict(zip(kk, tt)) for kk, tt in zip(repeat(keys), zip(*chunked_tensors))]
-    chunked_inputs = [{arg_key: c} for c in chunked_arg_val]
+    if type(arg_val) == dict:
+        chunked_inputs = chunk_dict(arg_val)
+    else:
+        # hard negative case
+        chunked_inputs_transposed = []
+        for hn in arg_val:
+            chunked_inputs_transposed.append(chunk_dict(hn))
+        
+        chunked_inputs = []
+        for i in range(len(chunked_inputs_transposed[0])):
+            chunked_inputs.append({arg_key: [x[i][arg_key] for x in chunked_inputs_transposed]})
 
     return chunked_inputs
 
@@ -79,12 +94,16 @@ def split_vlm_inputs(model_input: dict, chunk_size: int):
 
 def get_dense_rep(x):
     """
-    Get either qry_reps or tgt_reps.
+    Get either qry_reps or tgt_reps or neg.
     """
-    if x["qry_reps"] is None:
-        return x["tgt_reps"]
-    else:
+    if x["qry_reps"] is not None:
         return x["qry_reps"]
+    elif x['tgt_reps'] is not None:
+        return x["tgt_reps"]
+    elif x['neg_reps'] is not None:
+        return x['neg_reps']
+    else:
+        raise ValueError("All values are none")
 
 
 @dataclass
@@ -154,6 +173,19 @@ class Qwen2_5VLMultimodalProcessor:
         if len(videos) == 0:
             videos = None
 
+        vlm_image_token = getattr(self.processor, "image_token", "<|image_pad|>")
+        fake_visual_token_len = 0
+
+        has_images = images is not None and any(i is not None for i in images)
+        has_videos = videos is not None and any(v is not None for v in videos)
+
+        if not (has_images or has_videos):
+            text[0] = f"{vlm_image_token}{text[0]}"
+            images = [Image.new("RGB", (32, 32), (255, 255, 255))]
+            fake_visual_token_len = len(
+                self.processor(text=vlm_image_token, images=images)['input_ids'][0]
+            )
+
         output = self.processor(
             text=text,
             images=images,
@@ -167,6 +199,14 @@ class Qwen2_5VLMultimodalProcessor:
             add_special_tokens=False,  # to avoid adding the BOS, twice see https://huggingface.co/blog/qgallouedec/gotchas-in-tokenizer-behavior#7-chat-template-and-tokenization-dont-compose-due-to-special-tokens
         )
 
+        attention_mask = output["attention_mask"].long()
+        if fake_visual_token_len > 0:
+            seq_len = attention_mask.shape[1]
+            content_len = int(attention_mask[0].sum().item())
+            start = seq_len - content_len  # first non-pad token (left-padding)
+            attention_mask[0, start:start + fake_visual_token_len] = 0
+
+        output['attention_mask'] = attention_mask
         return output
 
 def get_inputs(examples, text_key, visual_key):
@@ -252,7 +292,7 @@ class MultimodalDataCollator:
                             with Image.open(path) as img:
                                 image = img.convert("RGB")
                         else:
-                            print_rank(f"\n{'=' * 50}\nsomething went wrong with a data point from {example['global_dataset_name']}, neither bytes or path is given. \n\t\tquery_text: {example['query_text']}")
+                            print_rank(f"\n{'=' * 50}\nsomething went wrong with a data point from {example['global_dataset_name']}, neither bytes or path is given. \n\t\tquery_text: {example.get('query_text')}")
                         if not self.data_args.resize_use_processor and image is not None and image_resolution:
                             image = image.resize(image_resolution)
                         if image is not None and (self.data_args.image_decay_factor is not None and image_resolution is None):
@@ -283,24 +323,42 @@ class MultimodalDataCollator:
         """
         qry_inputs = self._get_batch_inputs(examples, "query_text", "query_image")
         pos_inputs = self._get_batch_inputs(examples, "pos_text", "pos_image")
-        neg_inputs = self._get_batch_inputs(examples, "neg_text", "neg_image")
+
+        neg_inputs = []
+        if self.data_args.hard_negative_dir:
+
+            for idx in range(self.data_args.hard_negatives_per_sample):
+                sample_neg_inputs = []
+                for example in examples:
+                    sample_neg_inputs.append({
+                        "neg_text": example['neg_text'][idx],
+                        "neg_image": example['neg_image'][idx],
+                        "global_dataset_name": example['global_dataset_name']
+                    })
+                sample_neg_inputs = self._get_batch_inputs(sample_neg_inputs, "neg_text", "neg_image")
+                neg_inputs.append(sample_neg_inputs)
+        
         bs = len(qry_inputs['text'])
         assert bs > 0, 'An empty batch'
         # pad batch to batch_size to avoid hanging in distributed training
         if self.batch_size is not None and bs < self.batch_size:
-            raise RuntimeError(f"Expect batch size {self.batch_size}, but got batch size of {bs}")
-            pass
+        # if bs < self.training_args.per_device_train_batch_size:
+            raise RuntimeError(f"Expect batch size {self.training_args.per_device_train_batch_size}, but got batch size of {bs}")
+
         process_fn = process_vlm_inputs_fns[self.training_args.model_backbone]
         qry_inputs = process_fn(qry_inputs, processor=self.processor, max_length=self.data_args.max_len, model_backbone=self.model_args.model_backbone)
         pos_inputs = process_fn(pos_inputs, processor=self.processor, max_length=self.data_args.max_len, model_backbone=self.model_args.model_backbone)
+        neg_inputs = [process_fn(neg_input, processor=self.processor, max_length=self.data_args.max_len, model_backbone=self.model_args.model_backbone) for neg_input in neg_inputs]
         qry_inputs['text'] = [e['query_text'] for e in examples]
         pos_inputs['text'] = [e['pos_text'] for e in examples]
         qry_inputs['global_dataset_name'] = [e['global_dataset_name'] for e in examples]
         pos_inputs['global_dataset_name'] = [e['global_dataset_name'] for e in examples]
         qry_inputs['task_id'] = torch.tensor([e['task_id'] for e in examples])
         pos_inputs['task_id'] = torch.tensor([e['task_id'] for e in examples])
+        qry_inputs['index_id'] = [e['index_id'] for e in examples]
+        pos_inputs['index_id'] = qry_inputs['index_id']
         # print_rank(f"\t\tQry collator: qry_inputs['input_ids'].shape={qry_inputs['input_ids'].shape}\t\tPos collator: pos_inputs['input_ids'].shape={pos_inputs['input_ids'].shape}")
-        return qry_inputs, pos_inputs
+        return qry_inputs, pos_inputs, neg_inputs
 
 def get_visual_token_ids(processor):
     if "Qwen2VLProcessor" in str(processor.__class__):  # Check if the processor is Qwen2VLProcessor

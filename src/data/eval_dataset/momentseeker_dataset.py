@@ -170,6 +170,7 @@ class MomentSeekerEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         dataset_infos = {
             "cand_names": cand_clip_names,
             "label_name": pos_clip_name,   # list of positive clip frame dirs
+            "query_id": (query, input_frames,)
         }
 
         return {

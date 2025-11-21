@@ -27,6 +27,7 @@ from src.model.model import MMEBModel
 from src.model.processor import get_backbone_name, load_processor, COLPALI
 from src.utils import batch_to_device, print_rank, print_master
 import multiprocessing
+
 from multiprocessing import Pool, cpu_count
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s [%(name)s:%(lineno)s] %(message)s')
 logger = logging.getLogger(__name__)

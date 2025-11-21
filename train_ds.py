@@ -80,14 +80,15 @@ def main():
 
     setattr(training_args, 'model_backbone', model_args.model_backbone)
 
-    with open(data_args.dataset_config, 'r') as yaml_file:
-        dataset_config = yaml.safe_load(yaml_file)
-        train_dataset = init_mixed_dataset(dataset_config, model_args, data_args, training_args, processor)
+    with training_args.main_process_first(local=False):
+        with open(data_args.dataset_config, 'r') as yaml_file:
+            dataset_config = yaml.safe_load(yaml_file)
+            train_dataset = init_mixed_dataset(dataset_config, model_args, data_args, training_args, processor)
 
-    if 'qwen2_5_vl' in model_args.model_backbone:
+    if 'qwen2_5_vl' in model_args.model_backbone or 'qwen3_vl' in model_args.model_backbone:
         train_collator = ContrastiveDataCollator(processor)
     else:
-        train_collator = MultimodalDataCollator(processor, model_args, data_args, training_args)
+        train_collator = MultimodalDataCollator(processor, model_args, data_args, training_args, batch_size=training_args.per_device_train_batch_size)
 
     trainer_cls = GradCacheLateProcessTrainer if training_args.grad_cache else MMEBTrainer
 
@@ -102,9 +103,9 @@ def main():
 
     # if "32b" in model_args.model_name.lower():
     setattr(training_args, "ddp_find_unused_parameters", False)
-    setattr(training_args, "gradient_checkpointing_kwargs", {"use_reentrant": False})
-    do_gradient_checkpointing = not (training_args.deepspeed and "zero3" in training_args.deepspeed)
-    setattr(training_args, "gradient_checkpointing", do_gradient_checkpointing)
+    setattr(training_args, "gradient_checkpointing_kwargs", {"use_reentrant": True})
+    # do_gradient_checkpointing = not (training_args.deepspeed and "zero3" in training_args.deepspeed)
+    setattr(training_args, "gradient_checkpointing", True)
 
     trainer = trainer_cls(
         model=model,

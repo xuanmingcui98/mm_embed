@@ -21,7 +21,7 @@ from src.model.vlm_backbone.qwen2_vl import Qwen2VLForConditionalGeneration, Qwe
 from src.model.vlm_backbone.qwen2_5_vl import Qwen2_5_VLForConditionalGeneration
 # from src.model.vlm_backbone.qwen2_5_vl_tokenselection import \
 #     Qwen2_5_VLForConditionalGeneration as Qwen2_5_VL_TokenSelectionForConditionalGeneration
-from transformers import AutoModelForImageTextToText
+from transformers import AutoModelForImageTextToText, Qwen3VLMoeForConditionalGeneration
 
 PHI_IMAGE_TOKEN_MAX_INPUT_ID = int(1e9)
 LLAVA_IMAGE_TOKEN_ID = 32000
@@ -33,6 +33,8 @@ QWEN2_VL_TOKENSELECTION = 'qwen2_vl'
 QWEN2_5_VL = 'qwen2_5_vl'
 QWEN2_VL_TOKENSELECTION = 'qwen2_vl_tokenselection'
 QWEN2_5_VL_TOKENSELECTION = 'qwen2_5_vl_tokenselection'
+QWEN3_VL = "qwen3_vl"
+QWEN3_VL_MOE = "qwen3_vl_moe"
 INTERNVIDEO2 = 'internvideo2'
 INTERNVL3 = "internvl"
 GME = 'gme'  # QWEN2-VL
@@ -50,6 +52,8 @@ MODEL2BACKBONE = {  # keys are from hf_config.model_type or manually added if no
     'qwen2_vl_tokenselection': QWEN2_VL_TOKENSELECTION,
     'qwen2_5_vl_tokenselection': QWEN2_5_VL_TOKENSELECTION,
     'internvideo2': INTERNVIDEO2,
+    'qwen3_vl_moe': QWEN3_VL_MOE,
+    'qwen3_vl': QWEN3_VL,
     'gme': GME, 
     'lamra': LamRA,
     'lamra_qwen25': LamRA,
@@ -65,6 +69,8 @@ VLM_IMAGE_TOKENS = {
     LLAVA_NEXT: "<image>",
     QWEN2_VL: "<|image_pad|>",
     QWEN2_5_VL: "<|image_pad|>",
+    QWEN3_VL: "<|image_pad|>",
+    QWEN3_VL_MOE: "<|image_pad|>",
     QWEN2_VL_TOKENSELECTION: "<|image_pad|>",
     QWEN2_5_VL_TOKENSELECTION: "<|image_pad|>",
     GME: "<|image_pad|>",
@@ -81,6 +87,8 @@ VLM_VIDEO_TOKENS = {
     LLAVA_NEXT: "<image>",
     QWEN2_VL: "<|video_pad|>",
     QWEN2_5_VL: "<|video_pad|>",
+    QWEN3_VL: "<|video_pad|>",
+    QWEN3_VL_MOE: "<|video_pad|>",
     QWEN2_VL_TOKENSELECTION: "<|video_pad|>",
     QWEN2_5_VL_TOKENSELECTION: "<|video_pad|>",
     GME: "<|video_pad|>",
@@ -98,6 +106,8 @@ backbone2model = {
     # LLAVA_NEXT: LlavaNextForConditionalGeneration,
     QWEN2_VL: Qwen2VLForConditionalGeneration,
     QWEN2_5_VL: Qwen2_5_VLForConditionalGeneration,
+    QWEN3_VL: Qwen3VLMoeForConditionalGeneration,
+    QWEN3_VL_MOE: Qwen3VLMoeForConditionalGeneration,
     # QWEN2_VL_TOKENSELECTION: Qwen2VLTokenSelectionForConditionalGeneration,
     # QWEN2_5_VL_TOKENSELECTION: Qwen2_5_VL_TokenSelectionForConditionalGeneration,
     # INTERNVIDEO2: InternVideo2_Stage2,
@@ -172,6 +182,16 @@ def load_processor(model_args, data_args=None):
             if data_args.resize_max_pixels:
                 pixel_kwargs['max_pixels'] = data_args.resize_max_pixels
         processor = Qwen2_5_VLProcessor.from_pretrained(model_name_or_path, **pixel_kwargs)
+    elif model_args.model_backbone in [QWEN3_VL]:
+
+        from transformers import AutoProcessor
+        pixel_kwargs = {}
+        if data_args is not None:
+            if data_args.resize_min_pixels:
+                pixel_kwargs['min_pixels'] = data_args.resize_min_pixels
+            if data_args.resize_max_pixels:
+                pixel_kwargs['max_pixels'] = data_args.resize_max_pixels
+        processor = AutoProcessor.from_pretrained(model_name_or_path, **pixel_kwargs)
     else:
         from transformers import AutoProcessor
         processor = AutoProcessor.from_pretrained(
@@ -265,51 +285,302 @@ def Qwen2_VL_process_fn(model_inputs: dict, processor: Qwen2VLProcessor, max_len
     return inputs
 
 
+def Qwen2_VL_process_fn_ds(model_inputs: dict, processor, max_length=None, **kwargs):
+    """
+    Safe multimodal collator for ZeRO-3/FSDP (embedding setup, left padding):
+    - Injects dummy <image>/<video> placeholders when batch lacks that modality
+    - Inserts fake tokens on the LEFT and masks them out (attention_mask=0, labels=IGNORE_INDEX)
+    """
+    input_ids, pixel_values, image_grid_thw, pixel_values_videos, video_grid_thw = [], [], [], [], []
+    texts, visual_inputs = model_inputs["text"], model_inputs["images"]
+
+    vlm_image_token, vlm_video_token = VLM_IMAGE_TOKENS[QWEN2_VL], VLM_VIDEO_TOKENS[QWEN2_VL]
+    batch_imglens, batch_vidlens = [], []
+
+    # ----------------------------------------------------------------------
+    # Pass 1: normal processing
+    # ----------------------------------------------------------------------
+    for text, images in zip(texts, visual_inputs):
+        if images is None or (isinstance(images, list) and any(i is None for i in images)):
+            inputs = processor(
+                text=[text],
+                images=None,
+                return_tensors="np",
+                max_length=max_length,
+                truncation=True,
+            )
+            ids = inputs["input_ids"].squeeze().tolist()
+            if isinstance(ids, int):
+                ids = [ids]
+            input_ids.append(ids)
+            pixel_values.append(None)
+            image_grid_thw.append(None)
+            pixel_values_videos.append(None)
+            video_grid_thw.append(None)
+            batch_imglens.append(0)
+            batch_vidlens.append(0)
+        else:
+            if vlm_image_token in text:
+                if isinstance(images, Image.Image):
+                    images = [images]
+                for i, img in enumerate(images):
+                    if img.size[0] < 28 or img.size[1] < 28:
+                        images[i] = img.resize((56, 56))
+                inputs = processor(
+                    text=[text],
+                    images=images,
+                    return_tensors="np",
+                    input_data_format=ChannelDimension.LAST,
+                )
+                batch_imglens.append(len(images))
+                batch_vidlens.append(0)
+            elif vlm_video_token in text:
+                inputs = processor(
+                    text=[text],
+                    videos=[images],
+                    return_tensors="np",
+                    input_data_format=ChannelDimension.LAST,
+                )
+                batch_imglens.append(0)
+                batch_vidlens.append(len(images))
+            else:
+                raise NotImplementedError(
+                    f"No visual token ({vlm_image_token}/{vlm_video_token}) found in text: {text}"
+                )
+
+            ids = inputs["input_ids"].squeeze().tolist()
+            input_ids.append(ids)
+
+            if "pixel_values" in inputs:
+                pixel_values.append(inputs["pixel_values"])
+                image_grid_thw.append(inputs["image_grid_thw"])
+                pixel_values_videos.append(None)
+                video_grid_thw.append(None)
+            else:
+                pixel_values.append(None)
+                image_grid_thw.append(None)
+                pixel_values_videos.append(inputs["pixel_values_videos"])
+                video_grid_thw.append(inputs["video_grid_thw"])
+
+    # ----------------------------------------------------------------------
+    # Pass 2: Inject dummy modality (fake inputs) if needed
+    # ----------------------------------------------------------------------
+    fake_input_ids = []
+    need_fake_image = sum(batch_imglens) == 0
+    need_fake_video = sum(batch_vidlens) == 0
+
+    # ---- fake image ----
+    if vlm_image_token is not None and need_fake_image and need_fake_video:
+        fake_messages = [{"role": "user", "content": vlm_image_token}]
+        fake_images = [Image.new("RGB", (32, 32), (255, 255, 255))]
+        fake_inputs = processor(
+            text=[fake_messages[0]["content"]],
+            images=fake_images,
+            return_tensors="np",
+            input_data_format=ChannelDimension.LAST,
+        )
+        _fake_ids = fake_inputs["input_ids"].squeeze().tolist()
+        if isinstance(_fake_ids, int):
+            _fake_ids = [_fake_ids]
+        fake_input_ids.extend(_fake_ids)
+
+        # prepend fake ids (LEFT padding style)
+        input_ids[0] = _fake_ids + input_ids[0]
+        pixel_values[0] = fake_inputs["pixel_values"]
+        image_grid_thw[0] = fake_inputs["image_grid_thw"]
+        batch_imglens[0] = 1
+
+    # ---- fake video ----
+    if vlm_video_token is not None and need_fake_video:
+        fake_messages = [{"role": "user", "content": vlm_video_token}]
+        fake_video = [np.zeros((1, 32, 32, 3), dtype=np.uint8)]
+        fake_inputs = processor(
+            text=[fake_messages[0]["content"]],
+            videos=fake_video,
+            return_tensors="np",
+            input_data_format=ChannelDimension.LAST,
+        )
+        _fake_ids = fake_inputs["input_ids"].squeeze().tolist()
+        if isinstance(_fake_ids, int):
+            _fake_ids = [_fake_ids]
+        fake_input_ids.extend(_fake_ids)
+
+        # prepend fake ids (LEFT padding style)
+        input_ids[0] = _fake_ids + input_ids[0]
+        pixel_values_videos[0] = fake_inputs["pixel_values_videos"]
+        video_grid_thw[0] = fake_inputs["video_grid_thw"]
+        batch_vidlens[0] = 1
+
+    # ----------------------------------------------------------------------
+    # Pass 3: Tokenizer pad + build masks
+    # ----------------------------------------------------------------------
+    batch_encoding = processor.tokenizer.pad(
+        {"input_ids": input_ids}, return_tensors="pt", padding=True
+    )
+    input_ids_pt = batch_encoding["input_ids"].long()
+    attention_mask = batch_encoding["attention_mask"].long()
+
+    if len(fake_input_ids) != 0:
+        fake_len = len(fake_input_ids)
+        attention_mask[0, :fake_len] = 0
+
+    inputs = {
+        "input_ids": input_ids_pt,
+        "attention_mask": attention_mask,
+        "texts": texts,
+        "images": visual_inputs,
+        "pixel_values": pixel_values,
+        "image_grid_thw": image_grid_thw,
+        "pixel_values_videos": pixel_values_videos,
+        "video_grid_thw": video_grid_thw,
+    }
+    return inputs
+
+
+
+
+# def process_fn(model_inputs: dict, processor, model_backbone=None, **kwargs):
+#     # TODO: set separate max_len for text/visual inputs, currently max_length is only applied to text-only data
+#     texts, visual_inputs = model_inputs['text'], model_inputs['images']
+#     vlm_image_token, vlm_video_token = processor.image_token, processor.video_token
+    
+#     image_inputs, video_inputs = [], []
+
+#     for text, visual in zip(texts, visual_inputs):
+#         # if visual is None or (type(visual)==list and any(i is None for i in visual)):
+#         #     # fill here
+#         #     pass
+#         # else:
+
+#         if vlm_image_token in text:
+#             visual = visual if isinstance(visual, PIL.Image.Image) else visual[0]
+#             if visual.size[0] < 28 or visual.size[1] < 28:
+#                 visual = visual.resize((56, 56))
+#             image_inputs.append(visual)
+#         elif vlm_video_token in text:
+#             assert isinstance(visual, list) and len(visual) > 1, f"Video data must have more than 1 frame, got {type(visual)} with length {len(visual) if isinstance(visual, list) else 'N/A'}"
+#             video_inputs.append(visual)
+
+#     inputs = processor(text=texts,
+#                        images=image_inputs if image_inputs else None,
+#                        videos=video_inputs if video_inputs else None,
+#                        padding=True,
+#                        padding_side="left")
+
+#     return inputs
+
+
 def process_fn(model_inputs: dict, processor, model_backbone=None, **kwargs):
-    # TODO: set separate max_len for text/visual inputs, currently max_length is only applied to text-only data
+    """
+    Multimodal batch processor (text, image, video) for ZeRO-3 embedding training.
+    - Left padding
+    - Per-sample placeholders when a sample expects a visual but it's missing
+    - Batch-level dummy injection when the whole batch has no visuals, and mask those fake ids
+    """
     texts, visual_inputs = model_inputs['text'], model_inputs['images']
     vlm_image_token, vlm_video_token = processor.image_token, processor.video_token
-    
+
     image_inputs, video_inputs = [], []
+    texts_adj = list(texts)  # we may modify text[0] for batch-level dummy
 
+    # -------------------------------
+    # Pass 1: per-sample visuals
+    # -------------------------------
     for text, visual in zip(texts, visual_inputs):
-        if visual is None or (type(visual)==list and any(i is None for i in visual)):
-            # add placeholder
-            if vlm_image_token in text:
-                # make a dummy 56x56 black image
-                placeholder = Image.fromarray(np.zeros((56, 56, 3), dtype=np.uint8))
-                image_inputs.append(placeholder)
-            elif vlm_video_token in text:
-                # make a dummy video: list of identical frames
+        has_img_tok = (vlm_image_token is not None) and (vlm_image_token in text)
+        has_vid_tok = (vlm_video_token is not None) and (vlm_video_token in text)
+
+        if has_vid_tok:
+            # needs video; ensure it exists
+            if not (isinstance(visual, list) and len(visual) > 1):
+                # dummy 2-frame black video
                 frame = Image.fromarray(np.zeros((56, 56, 3), dtype=np.uint8))
-                placeholder = [frame, frame]  # at least 2 frames
-                video_inputs.append(placeholder)
-        else:
-
-            if vlm_image_token in text:
-                visual = visual if isinstance(visual, PIL.Image.Image) else visual[0]
-                if visual.size[0] < 28 or visual.size[1] < 28:
-                    visual = visual.resize((56, 56))
-                image_inputs.append(visual)
-            elif vlm_video_token in text:
-                assert isinstance(visual, list) and len(visual) > 1, f"Video data must have more than 1 frame, got {type(visual)} with length {len(visual) if isinstance(visual, list) else 'N/A'}"
+                video_inputs.append([frame, frame])
+            else:
                 video_inputs.append(visual)
+            image_inputs.append(None)
 
-    inputs = processor(text=texts,
-                       images=image_inputs if image_inputs else None,
-                       videos=video_inputs if video_inputs else None,
-                       padding=True,
-                       padding_side="left")
+        elif has_img_tok:
+            # needs image; ensure it exists
+            if visual is None:
+                img = Image.fromarray(np.zeros((56, 56, 3), dtype=np.uint8))  # dummy image
+            else:
+                img = visual if isinstance(visual, Image.Image) else visual[0]
+                if img.size[0] < 28 or img.size[1] < 28:
+                    img = img.resize((56, 56))
+            image_inputs.append(img)
+            video_inputs.append(None)
+
+        else:
+            # text-only sample: no visual expected
+            image_inputs.append(None)
+            video_inputs.append(None)
+
+    has_images = any(img is not None for img in image_inputs)
+    has_videos = any(v is not None for v in video_inputs)
+
+    # -------------------------------
+    # Pass 2: batch-level dummy injection (independent)
+    # -------------------------------
+    # (A) If no image at all → insert dummy image into first sample
+    if not has_images:
+        texts_adj[0] = f"{vlm_image_token}{texts_adj[0]}"
+        image_inputs = Image.new("RGB", (32, 32), (255, 255, 255))
+        fake_image_token_len = len(
+            processor.tokenizer.encode(vlm_image_token, add_special_tokens=False)
+        )
+        has_images = True
+
+    # (B) If no video at all → insert dummy video into first sample
+    if not has_videos:
+        texts_adj[0] = f"{vlm_video_token}{texts_adj[0]}"
+        frame = Image.fromarray(np.zeros((32, 32, 3), dtype=np.uint8))
+        video_inputs = [[frame, frame]]
+        fake_video_token_len = len(
+            processor.tokenizer.encode(vlm_video_token, add_special_tokens=False)
+        )
+        has_videos = True
+
+    # -------------------------------
+    # Pass 3: run processor
+    # -------------------------------
+    inputs = processor(
+        text=texts_adj,
+        images=image_inputs if has_images else None,
+        videos=video_inputs if has_videos else None,
+        padding=True,
+        padding_side="left",
+        return_tensors="pt",
+    )
+
+    input_ids = inputs["input_ids"].long()
+    attention_mask = inputs["attention_mask"].long()
+
+    # -------------------------------
+    # Pass 4: mask fake tokens (treat as left-padding)
+    # -------------------------------
+    total_fake = fake_image_token_len + fake_video_token_len
+    if total_fake > 0:
+        seq_len = attention_mask.shape[1]
+        content_len = int(attention_mask[0].sum().item())
+        start = seq_len - content_len  # first non-pad position
+        # mask the fake tokens at left
+        attention_mask[0, start:start + total_fake] = 0
+
+    inputs["input_ids"] = input_ids
+    inputs["attention_mask"] = attention_mask
 
     return inputs
 
 
+
 process_vlm_inputs_fns = {
     QWEN2_VL: Qwen2_VL_process_fn,
-    # QWEN2_VL: process_fn, 
+    # QWEN2_VL: Qwen2_VL_process_fn_ds, 
     # QWEN2_5_VL: Qwen2_VL_process_fn,
     QWEN2_5_VL: process_fn,
-    INTERNVL3: process_fn
+    INTERNVL3: process_fn,
+    QWEN3_VL: process_fn
 
 }
 

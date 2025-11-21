@@ -96,6 +96,7 @@ class ActivityNetQAEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         query_images = {"bytes": [None] * len(qry_frame_paths), "paths": qry_frame_paths, "resolutions": [None] * len(qry_frame_paths)}
         cand_images = [None] * len(OPTIONS)
         dataset_info = {
+                "query_id": (original_query, video_name),
                 "question_id": question_id,
                 "video_id": video_name,
                 "query": query,

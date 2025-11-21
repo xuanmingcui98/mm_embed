@@ -68,6 +68,7 @@ class VatexEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                 print(f"No target description for video {video_name} in {self.dataset_config['dataset_name']} dataset")
 
         dataset_info = {
+            "query_id": (caption_text,),
             "cand_names": [video_name],
             "label_name": video_name,
         }

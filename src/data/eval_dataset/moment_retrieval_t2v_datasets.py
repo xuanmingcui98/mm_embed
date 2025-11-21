@@ -117,10 +117,12 @@ class MomentRetrievalT2VEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             if not query_description:
                 print(f'No query description found for ({query_text_raw}, {video_name}) for dataset {self.dataset_config["dataset_name"]}')
 
+
+        dataset_infos['query_id'] = (query_description or "", )
         return {
             "query_text": query_text,
             "query_image": query_image,   # dict with paths/bytes/resolutions or None
-            "cand_text": cand_text,       # list[str], len == num candidates
+            "cand_text": cand_text,       # list[str], len == num candidateskerngktuekbbnnbghjvftlikveurlcur
             "cand_image": cand_image,     # list[dict], aligned with cand_text
             "dataset_infos": dataset_infos,
             "query_description": query_description,

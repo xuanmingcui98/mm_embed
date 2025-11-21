@@ -6,8 +6,11 @@ VIDEO_TASKS = {"video_caption_300k-v2t", "video_qa_240k", "video_caption_300k-t2
                'SmthSmthV2', 'HMDB51', 'UCF101', 'Kinetics-700', 'Breakfast', 'MSR-VTT', 'MSVD', 'DiDeMo', 'YouCook2', 'VATEX', 'QVHighlight', 'Charades-STA', 'MomentSeeker', 'Video-MME', 'NExTQA', 'EgoSchema', 'MVBench', 'ActivityNetQA'}
 VISDOC_TASKS = {"VisRAG-Indomain-data", "colpali_train_set",
                 'ViDoRe_arxivqa', 'ViDoRe_docvqa', 'ViDoRe_infovqa', 'ViDoRe_tabfquad', 'ViDoRe_tatdqa', 'ViDoRe_shiftproject', 'ViDoRe_syntheticDocQA_artificial_intelligence', 'ViDoRe_syntheticDocQA_energy', 'ViDoRe_syntheticDocQA_government_reports', 'ViDoRe_syntheticDocQA_healthcare_industry', 'VisRAG_ArxivQA', 'VisRAG_ChartQA', 'VisRAG_MP-DocVQA', 'VisRAG_SlideVQA', 'VisRAG_InfoVQA', 'VisRAG_PlotQA', 'ViDoSeek-page', 'ViDoSeek-doc', 'MMLongBench-doc', 'MMLongBench-page', "ViDoRe_esg_reports_human_labeled_v2", "ViDoRe_biomedical_lectures_v2_multilingual", "ViDoRe_economics_reports_v2_multilingual", "ViDoRe_esg_reports_v2_multilingual"}
+MULTILINGUAL = {"CrossModal3600", "XTD10"}
 
-ALL_TASKS = IMAGE_TASKS | VIDEO_TASKS | VISDOC_TASKS
+
+ALL_TASKS = IMAGE_TASKS | VIDEO_TASKS | VISDOC_TASKS | MULTILINGUAL
+
 
 ALL_EVAL_IMAGE_TASKS = IMAGE_TASKS - {"ImageNet_1K"}
 ALL_EVAL_VIDEO_TASKS = VIDEO_TASKS - {"video_caption_300k", "video_qa_240k", "video_caption_300k-video"}  # remove train tasks

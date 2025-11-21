@@ -119,6 +119,7 @@ class MomentSeekerT2VEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             cand_text = [tgt_txt] * (len(pos_clip_paths) + len(neg_clip_paths))
 
         dataset_infos = {
+            "query_id": (query_description,),
             "cand_names": cand_clip_names,
             "label_name": pos_clip_name,   # list of positive clip frame dirs
         }

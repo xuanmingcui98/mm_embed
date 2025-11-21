@@ -102,7 +102,7 @@ class MMEBTrainer(Trainer):
         return batch_samples, num_items_in_batch
 
     def compute_loss(self, model, inputs, *args, **kwargs):
-        qry_inputs, tgt_inputs = inputs
+        qry_inputs, tgt_inputs, neg_inputs = inputs
         return model(qry=qry_inputs, tgt=tgt_inputs)
 
     def _save(self, output_dir: Optional[str] = None, state_dict=None):
@@ -286,6 +286,7 @@ class MMEBTrainer(Trainer):
         use_accelerator_prepare = True if model is self.model else False
 
         if delay_optimizer_creation:
+
             if use_accelerator_prepare:
                 self._fsdp_qlora_plugin_updates()
                 self.model = self.accelerator.prepare(self.model)
@@ -300,10 +301,12 @@ class MMEBTrainer(Trainer):
                 else:
                     model, self.optimizer = self.accelerator.prepare(self.model, self.optimizer)
             else:
+
                 # to handle cases wherein we pass "DummyScheduler" such as when it is specified in DeepSpeed config.
                 model, self.optimizer, self.lr_scheduler = self.accelerator.prepare(
                     self.model, self.optimizer, self.lr_scheduler
                 )
+
         elif self.args.optim in [OptimizerNames.LOMO, OptimizerNames.ADALOMO]:
             # In this case we are in DDP + LOMO, which should be supported
             self.optimizer = self.accelerator.prepare(self.optimizer)
@@ -370,17 +373,23 @@ class MMEBTrainer(Trainer):
                     steps_trained_in_current_epoch *= args.gradient_accumulation_steps
                 else:
                     steps_trained_in_current_epoch = 0
+                
+                if args.ignore_data_skip:
+                    epochs_trained = 0
             else:
                 # If the dataloader does not have a length, we cannot restore the number of trained epochs.
                 # In the following loop, we repeatedly iterate over the dataloader to skip the first
                 # `steps_trained_in_current_epoch` steps and increment `epochs_trained` accordingly.
                 epochs_trained = 0
-                steps_trained_in_current_epoch = self.state.global_step * args.gradient_accumulation_steps
                 if args.ignore_data_skip:
-                    raise ValueError(
-                        "The dataloader does not have a length, so it is impossible to restore the number of trained"
-                        " epochs. Please disable the `ignore_data_skip` option."
-                    )
+                    steps_trained_in_current_epoch = 0
+                else:
+                    steps_trained_in_current_epoch = self.state.global_step * args.gradient_accumulation_steps
+                # if args.ignore_data_skip:
+                #     raise ValueError(
+                #         "The dataloader does not have a length, so it is impossible to restore the number of trained"
+                #         " epochs. Please disable the `ignore_data_skip` option."
+                #     )
             # @xuanming modified #33544 ends
 
             print_master("  Continuing training from checkpoint, will skip to saved global_step")
@@ -512,11 +521,12 @@ class MMEBTrainer(Trainer):
                     if self.args.include_num_input_tokens_seen:
                         main_input_name = getattr(self.model, "main_input_name", "input_ids")
                         if main_input_name not in inputs:
-                            logger.warning(
-                                "Tried to track the number of tokens seen, however the current model is "
-                                "not configured properly to know what item is the input. To fix this, add "
-                                "a `main_input_name` attribute to the model class you are using."
-                            )
+                            # logger.warning(
+                            #     "Tried to track the number of tokens seen, however the current model is "
+                            #     "not configured properly to know what item is the input. To fix this, add "
+                            #     "a `main_input_name` attribute to the model class you are using."
+                            # )
+                            pass
                         else:
                             input_tokens = inputs[main_input_name].numel()
                             input_tokens = torch.tensor(input_tokens, device=self.args.device, dtype=torch.int64)
@@ -875,13 +885,19 @@ class GradCacheLateProcessTrainer(MMEBTrainer):
         loss_fn = loss_fn_cls()
         # process_fn = functools.partial(process_vlm_inputs_fns[self.args.model_backbone], processor=self.processing_class, max_length=self.max_length)
 
+        models = [self.model, self.model]
+        chunk_sizes = [self.args.gc_q_chunk_size, self.args.gc_p_chunk_size]
+        if self.data_args.hard_negative_dir:
+            models.append(self.model)
+            chunk_sizes.append(self.args.gc_q_chunk_size)
+
         self.gc = GradCache(
             training_args=self.args,
             data_args=self.data_args,
             model_args=self.model_args,
             accelerator=self.accelerator,
-            models=[self.model, self.model],
-            chunk_sizes=[self.args.gc_q_chunk_size, self.args.gc_p_chunk_size],
+            models=models,
+            chunk_sizes=chunk_sizes,
             loss_fn=loss_fn,
             split_input_fn=split_and_process_vlm_inputs,
             # process_fn=process_fn,
@@ -892,13 +908,19 @@ class GradCacheLateProcessTrainer(MMEBTrainer):
 
     def training_step(self, model, inputs, *args, **kwargs) -> torch.Tensor:
         model.train()
-        queries, targets = inputs
+        queries, targets, negatives = inputs
         # queries = batch_to_device(queries, model.device)
         # targets = batch_to_device(targets, model.device)
         device = next(model.parameters()).device
         queries = batch_to_device(queries, device)
         targets = batch_to_device(targets, device)
         queries, targets = {'qry': queries}, {'tgt': targets}
+        
+        if self.data_args.hard_negative_dir:
+            negatives = [batch_to_device(neg, device) for neg in negatives]
+            negatives = {"neg": negatives}
+        else:
+            negatives = None
 
         unwrapped_model = self.model
         if hasattr(self.model, "module"):
@@ -910,9 +932,11 @@ class GradCacheLateProcessTrainer(MMEBTrainer):
         _distributed = self.args.local_rank > -1
         if _distributed:
             self.gc.models = [model, model]
-            loss_dict = self.gc(queries, targets, no_sync_except_last=_distributed, temperature=temperature, inter_task_temperature=inter_task_temperature)
+            if negatives:
+                self.gc.models.append(model)
+            loss_dict = self.gc(queries, targets, negatives, no_sync_except_last=_distributed, temperature=temperature, inter_task_temperature=inter_task_temperature)
         else:
-            loss_dict = model(queries, targets)
+            loss_dict = model(queries, targets, negatives)
 
         if 'cl_loss' in loss_dict:
             loss_dict['cl_loss'] = loss_dict['cl_loss'] / self._dist_loss_scale_factor

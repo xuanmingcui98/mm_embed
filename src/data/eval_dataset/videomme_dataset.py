@@ -110,6 +110,7 @@ class VideoMMMEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                 print(f"No query description for video {video_id} in {self.dataset_config['dataset_name']} dataset")
 
         dataset_info = {
+            "query_id": (query, video_id),
             "question_id": question_id,
             "video_id": video_id,
             "query": query_text,

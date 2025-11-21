@@ -106,6 +106,7 @@ class EgoSchemaEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                 print(f'No query description found for ({question}, {video_idx}) for dataset {self.dataset_config["dataset_name"]}')
 
         dataset_info = {
+            "query_id": (question, video_idx),
             "question_id": question_idx,
             "video_id": video_idx,
             "query": query,

@@ -24,6 +24,9 @@ from .visrag_dataset import VisragDatasetProcessor
 from .vidore_dataset import VideoDatasetProcessor
 from .llavahound_dataset_caption import LLaVaHoundCaptionDatasetProcessor
 from .llavahound_dataset_qa import LLaVaHoundQADatasetProcessor
+from .vidore_2 import Vidore2DatasetProcessor
+from .visrag_2 import VisRAGDatasetProcessor2
+from .base_dataset_2 import MMEBDatasetProcessor2
 # from .beir_dataset import BEIRDatasetProcessor
 # from .berri import load_berri
 # from .mteb_training import load_mteb_training

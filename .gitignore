@@ -113,3 +113,10 @@ results/
 generate_descriptions_v2_qwen.py
 generate_descriptions_v2_qwen_gt.py
 save_frames_from_videos.py
+
+rtc_results/
+pairwise_rewrites_gemini/
+pairwise_gemini_rewrite_v2/
+hard_negatives_qwen3reranker8b_clusterrewrite/
+*.pdf
+*.svg

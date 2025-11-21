@@ -74,6 +74,7 @@ class SSV2EvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
                 print(f"No query description for video {video_id} in {self.dataset_config['dataset_name']} dataset")
 
         dataset_info = {
+            "query_id": (video_id,),
             "cand_names": cand_text,
             "label_name": pos_text,
         }

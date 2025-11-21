@@ -47,7 +47,7 @@ class DiDemoEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
         query_text  = process_input_text(TASK_INST_QRY, model_backbone, text=caption)
         query_image = None
         cand_text, cand_image = [], []
-        dataset_infos = {"cand_names": [video_name], "label_name": video_name}
+        dataset_infos = {"cand_names": [video_name], "label_name": video_name, "query_id": (caption,)}
 
         target_description = None
         if self.target_descriptions:
@@ -76,6 +76,7 @@ class DiDemoEvalDatasetProcessor(MMEBV2EvalDatasetProcessor):
             dataset_infos["error"] = str(e)
 
         return {
+            
             "query_text": query_text,
             "query_image": query_image,     # None => no query-side image/video
             "cand_text": cand_text,         # list[str]
