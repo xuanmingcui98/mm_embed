@@ -28,9 +28,25 @@ def split_and_process_vlm_inputs(model_input: dict, chunk_size: int):
     def chunk_dict(d):
         keys = list(d.keys())
         chunked_tensors = []
+
+        num_groups = d["input_ids"].shape[0] // chunk_size
         for k in keys:
+
+            # for qwen3vl, the pixel_values are flattened, so need to recalculate the chunk size
+
             if isinstance(d[k], torch.Tensor):
-                chunked_tensor = d[k].split(chunk_size, dim=0)
+                if k == "pixel_values":
+                    # split the "image_grid_thw"
+                    chunk_sizes = d["image_grid_thw"].split(chunk_size, dim=0)
+                    # get the actual chunk sizes by image_grid_thw[-1] * image_grid_thw[-2]
+                    chunk_sizes = [(x[:, 1] * x[:, 2]).sum() for x in chunk_sizes]
+                    chunked_tensor = torch.split(d[k], chunk_sizes, dim=0)
+                elif k == "pixel_values_videos":
+                    chunk_sizes = d["video_grid_thw"].split(chunk_size, dim=0)
+                    chunk_sizes = [(x[:, 0] * x[:, 1] * x[:, 2]).sum() for x in chunk_sizes]
+                    chunked_tensor = torch.split(d[k], chunk_sizes, dim=0)
+                else:
+                    chunked_tensor = d[k].split(chunk_size, dim=0)
             else:
                 chunked_tensor = [d[k][i: i + chunk_size] for i in list(range(0, len(d[k]), chunk_size))]
             chunked_tensors.append(chunked_tensor)
@@ -173,18 +189,24 @@ class Qwen2_5VLMultimodalProcessor:
         if len(videos) == 0:
             videos = None
 
-        vlm_image_token = getattr(self.processor, "image_token", "<|image_pad|>")
+        vlm_image_token = getattr(self.processor, "vision_start_token", "<|vision_start|>") \
+            + getattr(self.processor, "image_token", "<|image_pad|>") \
+            + getattr(self.processor, "vision_end_token", "<|vision_end|>")
         fake_visual_token_len = 0
 
         has_images = images is not None and any(i is not None for i in images)
         has_videos = videos is not None and any(v is not None for v in videos)
 
-        if not (has_images or has_videos):
-            text[0] = f"{vlm_image_token}{text[0]}"
-            images = [Image.new("RGB", (32, 32), (255, 255, 255))]
-            fake_visual_token_len = len(
-                self.processor(text=vlm_image_token, images=images)['input_ids'][0]
-            )
+        # if has_images:
+        #     if type(images[0]) is list:
+        #         images = [x[0] for x in images]
+
+        # if not (has_images or has_videos):
+        #     text[0] = f"{vlm_image_token}{text[0]}"
+        #     images = [Image.new("RGB", (32, 32), (255, 255, 255))]
+        #     fake_visual_token_len = len(
+        #         self.processor(text=vlm_image_token, images=images)['input_ids'][0]
+        #     )
 
         output = self.processor(
             text=text,

@@ -158,7 +158,7 @@ class BaseEvalDatasetProcessor:
             self.dataset = self.dataset.select(range(1024))
         self.dataset = sample_dataset(self.dataset, **self.dataset_config)
         self.dataset = self.dataset.map(lambda x: self.batch_preprocess(x, **self.dataset_config), batched=True,
-                            batch_size=32, num_proc=0,
+                            batch_size=32, num_proc=1,
                             drop_last_batch=False, load_from_cache_file=False)
         # self.dataset = self.dataset.add_column("query_id", [row['dataset_infos']['query_id'] for row in self.dataset])
         # self.dataset = self.dataset.select_columns(["query_text", "query_image", "cand_text", "cand_image", "dataset_infos", "query_description"])

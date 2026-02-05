@@ -113,11 +113,11 @@ class MMEBTrainer(Trainer):
 
         state_dict = {k.replace("encoder.", "") : v for k, v in state_dict.items()}
         self.model.encoder.save_pretrained(
-            output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors
+            output_dir, state_dict=state_dict #, safe_serialization=self.args.save_safetensors
         )
 
-        if self.tokenizer is not None:
-            self.tokenizer.save_pretrained(output_dir)
+        if self.processor is not None:
+            self.processor.save_pretrained(output_dir)
 
         if self.model.pooling_module is not None:
             pooling_module_state_dict = self.model.pooling_module.state_dict()
@@ -232,8 +232,8 @@ class MMEBTrainer(Trainer):
             num_update_steps_per_epoch = None
             num_examples = total_train_batch_size * args.max_steps
             num_train_samples = args.max_steps * total_train_batch_size
-            if args.include_tokens_per_second:
-                num_train_tokens = self.num_tokens(train_dataloader, args.max_steps) * args.gradient_accumulation_steps
+            # if args.include_tokens_per_second:
+                # num_train_tokens = self.num_tokens(train_dataloader, args.max_steps) * args.gradient_accumulation_steps
         else:
             raise ValueError(
                 "args.max_steps must be set to a positive value if dataloader does not have a length, was"
@@ -296,10 +296,10 @@ class MMEBTrainer(Trainer):
         if use_accelerator_prepare:
             self.model.train()
             if hasattr(self.lr_scheduler, "step"):
-                if self.use_apex:
-                    model = self.accelerator.prepare(self.model)
-                else:
-                    model, self.optimizer = self.accelerator.prepare(self.model, self.optimizer)
+                # if self.use_apex:
+                #     model = self.accelerator.prepare(self.model)
+                # else:
+                model, self.optimizer = self.accelerator.prepare(self.model, self.optimizer)
             else:
 
                 # to handle cases wherein we pass "DummyScheduler" such as when it is specified in DeepSpeed config.
@@ -462,8 +462,8 @@ class MMEBTrainer(Trainer):
             # @xuanming modified ends
 
             # Reset the past mems state at the beginning of each epoch if necessary.
-            if args.past_index >= 0:
-                self._past = None
+            # if args.past_index >= 0:
+            #     self._past = None
 
             steps_in_epoch = (
                 len(epoch_dataloader)
@@ -587,17 +587,17 @@ class MMEBTrainer(Trainer):
                         if args.max_grad_norm is not None and args.max_grad_norm > 0:
                             # deepspeed does its own clipping
 
-                            if self.use_apex:
-                                # Revert to normal clipping otherwise, handling Apex or full precision
-                                _grad_norm = torch.nn.utils.clip_grad_norm_(
-                                    amp.master_params(self.optimizer),
-                                    args.max_grad_norm,
-                                )
-                            else:
-                                _grad_norm = self.accelerator.clip_grad_norm_(
-                                    model.parameters(),
-                                    args.max_grad_norm,
-                                )
+                            # if self.use_apex:
+                            #     # Revert to normal clipping otherwise, handling Apex or full precision
+                            #     _grad_norm = torch.nn.utils.clip_grad_norm_(
+                            #         amp.master_params(self.optimizer),
+                            #         args.max_grad_norm,
+                            #     )
+                            # else:
+                            _grad_norm = self.accelerator.clip_grad_norm_(
+                                model.parameters(),
+                                args.max_grad_norm,
+                            )
 
                             if (
                                 is_accelerate_available()
@@ -656,9 +656,9 @@ class MMEBTrainer(Trainer):
             if self.control.should_training_stop:
                 break
 
-        if args.past_index and hasattr(self, "_past"):
-            # Clean the state at the end of training
-            delattr(self, "_past")
+        # if args.past_index and hasattr(self, "_past"):
+        #     # Clean the state at the end of training
+        #     delattr(self, "_past")
 
         print_master("\n\nTraining completed. Do not forget to share your model on huggingface.co/models =)\n\n")
         if args.load_best_model_at_end and self.state.best_model_checkpoint is not None:
@@ -908,7 +908,10 @@ class GradCacheLateProcessTrainer(MMEBTrainer):
 
     def training_step(self, model, inputs, *args, **kwargs) -> torch.Tensor:
         model.train()
-        queries, targets, negatives = inputs
+        if self.data_args.hard_negative_dir:
+            queries, targets, negatives = inputs
+        else:
+            queries, targets = inputs
         # queries = batch_to_device(queries, model.device)
         # targets = batch_to_device(targets, model.device)
         device = next(model.parameters()).device
@@ -930,13 +933,13 @@ class GradCacheLateProcessTrainer(MMEBTrainer):
         inter_task_temperature = unwrapped_model.inter_task_temperature
 
         _distributed = self.args.local_rank > -1
-        if _distributed:
-            self.gc.models = [model, model]
-            if negatives:
-                self.gc.models.append(model)
-            loss_dict = self.gc(queries, targets, negatives, no_sync_except_last=_distributed, temperature=temperature, inter_task_temperature=inter_task_temperature)
-        else:
-            loss_dict = model(queries, targets, negatives)
+        # if _distributed:
+        self.gc.models = [model, model]
+        if negatives:
+            self.gc.models.append(model)
+        loss_dict = self.gc(queries, targets, negatives, no_sync_except_last=_distributed, temperature=temperature, inter_task_temperature=inter_task_temperature)
+        # else:
+        #     loss_dict = model(queries, targets, negatives)
 
         if 'cl_loss' in loss_dict:
             loss_dict['cl_loss'] = loss_dict['cl_loss'] / self._dist_loss_scale_factor

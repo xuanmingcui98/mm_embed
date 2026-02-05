@@ -16,12 +16,12 @@ from src.model.processor import (LLAVA_NEXT, QWEN2_VL, PHI3V,
                                  backbone2model, GME, VLM_IMAGE_TOKENS, 
                                  QWEN3_VL,
                                  LamRA, LamRA_QWEN2_5, COLPALI, INTERNVL3, E5_V, PLM)
-from src.model.baseline_backbone.colpali import ColPali
-from src.model.baseline_backbone.gme.gme_inference import GmeQwen2VL
-from src.model.baseline_backbone.lamra.lamra_inference import LamRAQwen2VL
-from src.model.baseline_backbone.lamra.lamra_qwen25_inference import LamRAQwen25VL
-from src.model.baseline_backbone.phi3_v.modeling_phi3_v import Phi3VForCausalLM
-from src.model.baseline_backbone.llava_next import LlavaNextForConditionalGeneration
+# from src.model.baseline_backbone.colpali import ColPali
+# from src.model.baseline_backbone.gme.gme_inference import GmeQwen2VL
+# from src.model.baseline_backbone.lamra.lamra_inference import LamRAQwen2VL
+# from src.model.baseline_backbone.lamra.lamra_qwen25_inference import LamRAQwen25VL
+# from src.model.baseline_backbone.phi3_v.modeling_phi3_v import Phi3VForCausalLM
+# from src.model.baseline_backbone.llava_next import LlavaNextForConditionalGeneration
 from src.model.processor import load_processor, get_visual_token_ids
 from contextlib import nullcontext
 from src.loss import SimpleContrastiveLoss, DistributedContrastiveLoss

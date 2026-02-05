@@ -66,7 +66,7 @@ test.ipynb
 # *_orig.py
 *.json
 scripts/*
-
+*.whl
 activity.parquet
 additional_ds.md
 analysis.ipynb
@@ -93,6 +93,17 @@ inference_results2/
 inference_results_newhf/
 inference_results_newhf_flashattn/
 inference_results_old/
+qwen2-7B_v2_imageonly_chat_qry_sft_lr2e-5_fullft_noscalebyprocess_8x8_479602/
+src/data/dataset/base_dataset_2.py
+# src/data/dataset/tmp_didemo.py
+reranker_speed_benchmark.py
+gen_descriptions_vllm.py
+ecr/
+noisy_scores.txt
+train.sh
+eval.sh
+src/data/dataset/vidore_2.py
+src/data/dataset/visrag_2.py
 inference_results_v2/
 merge_lora.py
 *.parquet
@@ -105,7 +116,7 @@ test.png
 *.png
 tmp.py
 *.csv
-
+src/data/dataset/tmp_didemo.py
 results/
 *.ttf
 *.ipynb

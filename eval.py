@@ -77,7 +77,10 @@ def encode_embeddings(
             with torch.autocast(enabled=True, dtype=torch.bfloat16, device_type="cuda"):
                 # Determine if encoding query or target based on available keys
                 if encode_side == "qry":
+
+                    now = time.time()
                     output = model(qry=inputs)
+                    print("Encoding batch time:", time.time() - now)
                     reps = output["qry_reps"].detach()
                     local_gt_infos.extend(dataset_info)  # to retain all information per query
                 else:

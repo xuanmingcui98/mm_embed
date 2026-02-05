@@ -91,7 +91,7 @@ class DataArguments:
     hard_negative_dir: str = field(default=None)
     hard_negative_filter_strategy: str = field(default="pp")
     hard_negative_filter_threshold: float = field(default=1.)
-    hard_negatives_per_sample: int = field(default=7)
+    hard_negatives_per_sample: int = field(default=1)
 
 @dataclass
 class TrainingArguments(TrainingArguments):

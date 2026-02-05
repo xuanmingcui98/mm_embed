@@ -56,8 +56,8 @@ class VisragDatasetProcessor(VideoDatasetProcessor):
 
         if dataset_name:
             # dataset = load_dataset("/home/xuanmingcui/.cache/huggingface/datasets/openbmb___vis_rag-ret-train-in-domain-data/default/0.0.0/9c2ecd955e15151b57c6e4ae7a7bb13dc5ad09d2", split=dataset_split)
-            # dataset = load_dataset("openbmb/VisRAG-Ret-Train-In-domain-data", split=dataset_split)
-            dataset = load_from_disk("/home/xuanmingcui/datasets/visrag_train_in_domain_data")
+            dataset = load_dataset("openbmb/VisRAG-Ret-Train-In-domain-data", split=dataset_split)
+            # dataset = load_from_disk("/home/xuanmingcui/datasets/visrag_train_in_domain_data")
         elif dataset_path:
             dataset = load_dataset("parquet", data_files=dataset_path, split="train")
         

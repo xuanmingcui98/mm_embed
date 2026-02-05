@@ -13,15 +13,15 @@ from src.utils import print_master
 
 # from src.model.baseline_backbone.llava_next import LlavaNextForConditionalGeneration
 # from src.model.baseline_backbone.phi3_v.modeling_phi3_v import Phi3VForCausalLM
-from src.model.vlm_backbone.qwen2_vl import Qwen2VLForConditionalGeneration, Qwen2VLProcessor
+# from src.model.vlm_backbone.qwen2_vl import Qwen2VLForConditionalGeneration, Qwen2VLProcessor
 # from src.model.vlm_backbone.qwen2_vl_tokenselection import \
 #     Qwen2VLForConditionalGeneration as Qwen2VLTokenSelectionForConditionalGeneration, \
 #     Qwen2VLProcessor as Qwen2VLTokenSelectionProcessor
 # from src.model.baseline_backbone.internvideo2.modeling_internvideo2 import InternVideo2_Stage2
-from src.model.vlm_backbone.qwen2_5_vl import Qwen2_5_VLForConditionalGeneration
+# from src.model.vlm_backbone.qwen2_5_vl import Qwen2_5_VLForConditionalGeneration
 # from src.model.vlm_backbone.qwen2_5_vl_tokenselection import \
 #     Qwen2_5_VLForConditionalGeneration as Qwen2_5_VL_TokenSelectionForConditionalGeneration
-from transformers import AutoModelForImageTextToText, Qwen3VLMoeForConditionalGeneration
+from transformers import AutoModelForImageTextToText #, Qwen3VLMoeForConditionalGeneration
 
 PHI_IMAGE_TOKEN_MAX_INPUT_ID = int(1e9)
 LLAVA_IMAGE_TOKEN_ID = 32000
@@ -104,10 +104,10 @@ VLM_VIDEO_TOKENS = {
 backbone2model = {
     # PHI3V: Phi3VForCausalLM,
     # LLAVA_NEXT: LlavaNextForConditionalGeneration,
-    QWEN2_VL: Qwen2VLForConditionalGeneration,
-    QWEN2_5_VL: Qwen2_5_VLForConditionalGeneration,
-    QWEN3_VL: Qwen3VLMoeForConditionalGeneration,
-    QWEN3_VL_MOE: Qwen3VLMoeForConditionalGeneration,
+    # QWEN2_VL: Qwen2VLForConditionalGeneration,
+    # QWEN2_5_VL: Qwen2_5_VLForConditionalGeneration,
+    # QWEN3_VL: Qwen3VLMoeForConditionalGeneration,
+    # QWEN3_VL_MOE: Qwen3VLMoeForConditionalGeneration,
     # QWEN2_VL_TOKENSELECTION: Qwen2VLTokenSelectionForConditionalGeneration,
     # QWEN2_5_VL_TOKENSELECTION: Qwen2_5_VL_TokenSelectionForConditionalGeneration,
     # INTERNVIDEO2: InternVideo2_Stage2,
@@ -209,7 +209,7 @@ def get_backbone_name(hf_config, model_type=None):
     return MODEL2BACKBONE[hf_config.model_type]
 
 
-def Qwen2_VL_process_fn(model_inputs: dict, processor: Qwen2VLProcessor, max_length=None, **kwargs):
+def Qwen2_VL_process_fn(model_inputs: dict, processor, max_length=None, **kwargs):
     # TODO: set separate max_len for text/visual inputs, currently max_length is only applied to text-only data
     input_ids, pixel_values, image_grid_thw, pixel_values_videos, video_grid_thw = [], [], [], [], []
     texts, visual_inputs = model_inputs['text'], model_inputs['images']
@@ -523,23 +523,15 @@ def process_fn(model_inputs: dict, processor, model_backbone=None, **kwargs):
     # Pass 2: batch-level dummy injection (independent)
     # -------------------------------
     # (A) If no image at all → insert dummy image into first sample
-    if not has_images:
+
+    fake_image_token_len = 0
+    if not (has_images or has_videos):
         texts_adj[0] = f"{vlm_image_token}{texts_adj[0]}"
         image_inputs = Image.new("RGB", (32, 32), (255, 255, 255))
         fake_image_token_len = len(
             processor.tokenizer.encode(vlm_image_token, add_special_tokens=False)
         )
         has_images = True
-
-    # (B) If no video at all → insert dummy video into first sample
-    if not has_videos:
-        texts_adj[0] = f"{vlm_video_token}{texts_adj[0]}"
-        frame = Image.fromarray(np.zeros((32, 32, 3), dtype=np.uint8))
-        video_inputs = [[frame, frame]]
-        fake_video_token_len = len(
-            processor.tokenizer.encode(vlm_video_token, add_special_tokens=False)
-        )
-        has_videos = True
 
     # -------------------------------
     # Pass 3: run processor
@@ -559,13 +551,13 @@ def process_fn(model_inputs: dict, processor, model_backbone=None, **kwargs):
     # -------------------------------
     # Pass 4: mask fake tokens (treat as left-padding)
     # -------------------------------
-    total_fake = fake_image_token_len + fake_video_token_len
-    if total_fake > 0:
+
+    if fake_image_token_len > 0:
         seq_len = attention_mask.shape[1]
         content_len = int(attention_mask[0].sum().item())
         start = seq_len - content_len  # first non-pad position
         # mask the fake tokens at left
-        attention_mask[0, start:start + total_fake] = 0
+        attention_mask[0, start:start + fake_image_token_len] = 0
 
     inputs["input_ids"] = input_ids
     inputs["attention_mask"] = attention_mask
