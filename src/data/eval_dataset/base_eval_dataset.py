@@ -243,16 +243,23 @@ class BaseEvalDatasetProcessor:
 
         description = format_description(description, self.data_args.prompt_format)
 
-        formatted_sample = [
-            {"role": "system",
-            "content": "You are a helpful assistant specialized in multimodal embedding."}
-        ]
+        if "embedding" in self.model_args.model_name.lower():
+            formatted_sample = [
+                {"role": "system",
+                "content": text}
+            ]
+        else:
+            formatted_sample = [
+                {"role": "system",
+                "content": "You are a helpful assistant specialized in multimodal embedding."}
+            ]
         user_content = [] 
         if image_path:
             user_content.append({"type": "image", "image": image_path})
         if video_path:
             user_content.append({"type": "video", "video": video_path})
-        user_content.append({"type": "text", "text": text})
+        if not "embedding" in self.model_args.model_name.lower():
+            user_content.append({"type": "text", "text": text})
         formatted_sample.append({"role": "user", "content": user_content})
 
         if not add_generation_prompt:

@@ -168,6 +168,7 @@ class MMEBModel(nn.Module):
             hidden_states = hidden_states.hidden_states[-1]
             pooled_output = self._pooling(hidden_states, input['attention_mask'])
             return pooled_output
+
         else:
             if not self.training and do_sft:
                 _, hidden_states = self.generate(input, return_hidden_states=True, return_decode_answer=False)
@@ -178,7 +179,10 @@ class MMEBModel(nn.Module):
                     context = nullcontext()
                 with context:
                     results = self.encoder(**input, return_dict=True, output_hidden_states=True)
-            hidden_states = results.hidden_states[-1]
+            if  "embedding" in self.model_config.model_name.lower():
+                hidden_states = results.last_hidden_state
+            else:
+                hidden_states = results.hidden_states[-1]
             pooled_output = self._pooling(hidden_states, input['attention_mask'], input=input, results=results, do_sft=do_sft)
             return pooled_output, results
 
@@ -188,24 +192,32 @@ class MMEBModel(nn.Module):
             if do_sft and not self.training:
                 reps = last_hidden_state
             else:
-                left_padding = (attention_mask[:, -1].sum() == attention_mask.shape[0])
-                batch_size = last_hidden_state.shape[0]
-                if left_padding:
-                    if do_sft:
+                if "embedding" in self.model_config.model_name.lower():
+                    flipped_tensor = attention_mask.flip(dims=[1])
+                    last_one_positions = flipped_tensor.argmax(dim=1)
+                    col = attention_mask.shape[1] - last_one_positions - 1
+                    row = torch.arange(last_hidden_state.shape[0], device=last_hidden_state.device)
+                    reps = last_hidden_state[row, col]
+
+                else:
+                    left_padding = (attention_mask[:, -1].sum() == attention_mask.shape[0])
+                    batch_size = last_hidden_state.shape[0]
+                    if left_padding:
+                        if do_sft:
+                            # when we do sft we need the second to last position 
+                            # because llm's output is shifted by one
+                            reps = last_hidden_state[torch.arange(batch_size), -2, :]
+                        else:
                         # when we do sft we need the second to last position 
                         # because llm's output is shifted by one
-                        reps = last_hidden_state[torch.arange(batch_size), -2, :]
+                            reps = last_hidden_state[torch.arange(batch_size), -1, :]
                     else:
-                    # when we do sft we need the second to last position 
-                    # because llm's output is shifted by one
-                        reps = last_hidden_state[torch.arange(batch_size), -1, :]
-                else:
-                    # Calculate last 1 position in the original tensor
-                    eos_indices = attention_mask.sum(dim=1) - 1
-                    # Get the vectors at the last 1 position of each attention mask
-                    reps = last_hidden_state[
-                        torch.arange(batch_size, device=last_hidden_state.device), eos_indices]
-            
+                        # Calculate last 1 position in the original tensor
+                        eos_indices = attention_mask.sum(dim=1) - 1
+                        # Get the vectors at the last 1 position of each attention mask
+                        reps = last_hidden_state[
+                            torch.arange(batch_size, device=last_hidden_state.device), eos_indices]
+                
             if self.pooling_module_type == 'mlp':
                 # Apply MLP pooling
                 reps = self.pooling_module(reps)
@@ -301,6 +313,16 @@ class MMEBModel(nn.Module):
             base_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(model_args.model_name, 
                                                                             config=config,
                                                                             torch_dtype=torch.bfloat16)
+        elif "embedding" in model_args.model_name.lower():
+            from transformers.models.qwen3_vl.processing_qwen3_vl import Qwen3VLProcessor
+            from .qwen3_vl_embedding import Qwen3VLForEmbedding
+
+            processor = Qwen3VLProcessor.from_pretrained(model_args.model_name, padding_side='right')
+            # to be consistent with Qwen3VLEmbedding
+            base_model = Qwen3VLForEmbedding.from_pretrained(
+                model_args.model_name, trust_remote_code=True, **kwargs
+            )
+
         elif model_args.model_backbone == QWEN3_VL:
             from transformers import Qwen3VLForConditionalGeneration
             config._attn_implementation = "flash_attention_2" 
@@ -310,6 +332,7 @@ class MMEBModel(nn.Module):
             base_model = Qwen3VLForConditionalGeneration.from_pretrained(model_args.model_name, 
                                                                             config=config,
                                                                             torch_dtype=torch.bfloat16)
+
         elif model_backbone in [PLM]:
             # config._attn_implementation = "flash_attention_2"
             config.padding_side = "left"
@@ -513,6 +536,15 @@ class MMEBModel(nn.Module):
         elif model_args.model_backbone == INTERNVL3:
             # Loading the base model
             base_model = backbone2model[model_args.model_backbone].from_pretrained(model_args.model_name)
+        elif "embedding" in model_args.model_name.lower():
+            from transformers.models.qwen3_vl.processing_qwen3_vl import Qwen3VLProcessor
+            from .qwen3_vl_embedding import Qwen3VLForEmbedding
+
+            processor = Qwen3VLProcessor.from_pretrained(model_args.model_name, padding_side='right')
+            # to be consistent with Qwen3VLEmbedding
+            base_model = Qwen3VLForEmbedding.from_pretrained(
+                model_args.model_name, trust_remote_code=True, **kwargs
+            )
         else:
             # Loading external base model from HF
             config = AutoConfig.from_pretrained(model_args.model_name, trust_remote_code=True)
