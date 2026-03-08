@@ -11,7 +11,7 @@ class ModelArguments:
     model_backbone: str = field(default=None, metadata={"help": "HF model type"})
     checkpoint_path: str = field(default=None, metadata={"help": "a local model path, could be a LoRA version"})
     pooling_module: str = field(default='last', metadata={"help": "pooling method for encoder"})
-    normalize: bool = field(default=False, metadata={"help": "normalize query and passage representations"})
+    normalize: bool = field(default=True, metadata={"help": "normalize query and passage representations"})
     temperature: float = field(default=0.02, metadata={"help": "temperature for softmax"})
     lora: bool = field(default=False, metadata={"help": "do parameter-efficient fine-tuning with lora"})
     lora_r: int = field(default=16, metadata={"help": "lora r"})
